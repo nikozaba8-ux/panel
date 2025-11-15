@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # ==============================================
-# 🚀 COSMIC GAME PANEL - ULTIMATE EDITION
+# 🚀 COSMIC GAME PANEL - CODESANDBOX EDITION
 # ==============================================
 
-# Konfiguracja
-PANEL_DIR="$HOME/cosmic-panel"
+# Konfiguracja dla CodeSandbox
+PANEL_DIR="/tmp/cosmic-panel"
 WEB_DIR="$PANEL_DIR/web"
 SERVER_DIR="$PANEL_DIR/servers"
 LOG_DIR="$PANEL_DIR/logs"
@@ -14,9 +14,8 @@ CONFIG_DIR="$PANEL_DIR/config"
 BACKUP_DIR="$PANEL_DIR/backups"
 TEMP_DIR="$PANEL_DIR/temp"
 
-# Porty
-WEB_PORT=8080
-ADMIN_PORT=8081
+# Porty dla CodeSandbox
+WEB_PORT=${PORT:-8080}
 
 # Kolory kosmiczne
 NEBULA_PURPLE='\033[1;35m'
@@ -25,49 +24,18 @@ GALAXY_CYAN='\033[1;36m'
 PLANET_GREEN='\033[1;32m'
 COMET_YELLOW='\033[1;33m'
 NOVA_RED='\033[1;31m'
-COSMIC_BLACK='\033[0;30m'
-SPACE_WHITE='\033[1;37m'
-QUASAR_ORANGE='\033[1;38;5;208m'
 NC='\033[0m'
 
-# Dane logowania admina (domyślne)
-ADMIN_USERNAME="admin"
-ADMIN_PASSWORD="cosmic123"
-
-# Funkcje pomocnicze
 print_cosmic_header() {
     clear
     echo -e "${NEBULA_PURPLE}"
-    echo -e "╔══════════════════════════════════════════════════════════════╗"
-    echo -e "║                                                              ║"
-    echo -e "║  ██████  ██████  ███████ ███    ███ ██  ██████ ██████        ║"
-    echo -e "║ ██      ██    ██ ██      ████  ████ ██ ██      ██   ██       ║"
-    echo -e "║ ██      ██    ██ ███████ ██ ████ ██ ██ ██      ██████        ║"
-    echo -e "║ ██      ██    ██      ██ ██  ██  ██ ██ ██      ██   ██       ║"
-    echo -e "║  ██████  ██████  ███████ ██      ██ ██  ██████ ██   ██       ║"
-    echo -e "║                                                              ║"
-    echo -e "║                   🚀 COSMIC GAME PANEL                      ║"
-    echo -e "║                 Intergalactic Control Center                ║"
-    echo -e "║                                                              ║"
-    echo -e "╚══════════════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════════════════════╗"
+    echo "║                                                              ║"
+    echo "║  🚀 COSMIC GAME PANEL - CODESANDBOX EDITION                 ║"
+    echo "║         Intergalactic Control Center                        ║"
+    echo "║                                                              ║"
+    echo "╚══════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
-}
-
-loading_animation() {
-    local pid=$1
-    local text=$2
-    local delay=0.1
-    local spinstr='🕐🕑🕒🕓🕔🕕🕖🕗🕘🕙🕚🕛'
-    
-    echo -ne "${GALAXY_CYAN}${text} ${NC}"
-    while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
-        for i in {0..11}; do
-            echo -ne "\b${spinstr:$i:1}"
-            sleep $delay
-        done
-    done
-    echo -ne "\b✅"
-    echo
 }
 
 create_structure() {
@@ -75,15 +43,11 @@ create_structure() {
     echo -e "${COMET_YELLOW}🚀 Inicjalizacja struktury kosmicznego panelu...${NC}"
     
     mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR $BACKUP_DIR $TEMP_DIR
-    mkdir -p $SERVER_DIR/{fivem,minecraft,discord-bot,valheim,ark,csgo,teamspeak}
+    mkdir -p $SERVER_DIR/{fivem,minecraft,discord-bot,valheim}
     mkdir -p $WEB_DIR/{css,js,images,api}
     
     create_database
     create_web_interface
-    create_config_files
-    create_servers
-    create_backup_system
-    create_admin_panel
     
     echo -e "${PLANET_GREEN}✅ Struktura panelu została stworzona!${NC}"
 }
@@ -182,7 +146,7 @@ EOF
 create_web_interface() {
     echo -e "${STAR_BLUE}🌐 Tworzenie interfejsu kosmicznego...${NC}"
     
-    # Strona główna
+    # Strona główna (uproszczona)
     cat > "$WEB_DIR/index.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
@@ -191,170 +155,68 @@ create_web_interface() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🚀 Cosmic Game Panel</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@300;400;500;600&display=swap');
-        
         :root {
             --cosmic-dark: #0a0a1a;
             --nebula-purple: #8b5cf6;
             --star-blue: #3b82f6;
             --galaxy-cyan: #06b6d4;
             --planet-green: #10b981;
-            --comet-yellow: #f59e0b;
-            --nova-red: #ef4444;
-            --quasar-orange: #f97316;
             --space-white: #ffffff;
-            --cosmic-gradient: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
         }
-        
-        * { margin: 0; padding: 0; box-sizing: border-box; }
         
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--cosmic-gradient);
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
             color: var(--space-white);
+            margin: 0;
+            padding: 20px;
             min-height: 100vh;
-            overflow-x: hidden;
         }
         
-        .stars {
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            pointer-events: none;
-            z-index: -1;
-        }
-        
-        .star {
-            position: absolute;
-            background: white;
-            border-radius: 50%;
-            animation: twinkle 5s infinite;
-        }
-        
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.3; }
-            50% { opacity: 1; }
-        }
-        
-        .cosmic-nav {
-            background: rgba(10, 10, 26, 0.9);
-            backdrop-filter: blur(20px);
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--nebula-purple);
-            position: fixed;
-            width: 100%;
-            top: 0;
-            z-index: 1000;
-        }
-        
-        .nav-content {
+        .container {
             max-width: 1200px;
             margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 2rem 0;
         }
         
         .logo {
-            font-family: 'Orbitron', monospace;
-            font-size: 1.8rem;
+            font-size: 3rem;
             background: linear-gradient(45deg, var(--galaxy-cyan), var(--nebula-purple));
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
-        }
-        
-        .nav-links {
-            display: flex;
-            gap: 2rem;
-            list-style: none;
-        }
-        
-        .nav-links a {
-            color: var(--space-white);
-            text-decoration: none;
-            transition: color 0.3s;
-            font-weight: 500;
-        }
-        
-        .nav-links a:hover {
-            color: var(--galaxy-cyan);
-        }
-        
-        .hero {
-            padding: 120px 2rem 80px;
-            text-align: center;
-            max-width: 1000px;
-            margin: 0 auto;
-        }
-        
-        .hero h1 {
-            font-family: 'Orbitron', monospace;
-            font-size: 4rem;
             margin-bottom: 1rem;
-            background: linear-gradient(45deg, var(--galaxy-cyan), var(--nebula-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
         }
         
-        .hero p {
-            font-size: 1.3rem;
-            margin-bottom: 2rem;
-            color: #cbd5e1;
-        }
-        
-        .cta-buttons {
+        .nav {
             display: flex;
-            gap: 1rem;
             justify-content: center;
-            margin-top: 2rem;
+            gap: 2rem;
+            margin: 2rem 0;
         }
         
-        .btn {
-            padding: 1rem 2rem;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-decoration: none;
-            display: inline-block;
-            font-family: 'Space Grotesk', sans-serif;
-        }
-        
-        .btn-primary {
-            background: var(--nebula-purple);
-            color: white;
-        }
-        
-        .btn-secondary {
-            background: transparent;
+        .nav a {
             color: var(--space-white);
+            text-decoration: none;
+            padding: 1rem 2rem;
             border: 2px solid var(--nebula-purple);
+            border-radius: 8px;
+            transition: all 0.3s;
         }
         
-        .btn:hover {
+        .nav a:hover {
+            background: var(--nebula-purple);
             transform: translateY(-2px);
-            box-shadow: 0 10px 25px rgba(139, 92, 246, 0.3);
         }
         
         .features {
-            padding: 80px 2rem;
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .section-title {
-            text-align: center;
-            font-family: 'Orbitron', monospace;
-            font-size: 2.5rem;
-            margin-bottom: 3rem;
-            color: var(--space-white);
-        }
-        
-        .features-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 2rem;
+            margin: 3rem 0;
         }
         
         .feature-card {
@@ -362,166 +224,74 @@ create_web_interface() {
             padding: 2rem;
             border-radius: 15px;
             border: 1px solid var(--nebula-purple);
-            transition: transform 0.3s;
-        }
-        
-        .feature-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .feature-icon {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-        }
-        
-        .feature-card h3 {
-            color: var(--galaxy-cyan);
-            margin-bottom: 1rem;
+            text-align: center;
         }
         
         .stats {
-            background: rgba(30, 27, 75, 0.4);
-            padding: 4rem 2rem;
-            margin: 2rem auto;
-            max-width: 1200px;
-            border-radius: 20px;
-        }
-        
-        .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 2rem;
             text-align: center;
+            margin: 3rem 0;
+        }
+        
+        .stat {
+            background: rgba(30, 27, 75, 0.4);
+            padding: 2rem;
+            border-radius: 10px;
         }
         
         .stat-number {
-            font-family: 'Orbitron', monospace;
-            font-size: 3rem;
+            font-size: 2.5rem;
             color: var(--planet-green);
-            margin-bottom: 0.5rem;
-        }
-        
-        .cosmic-footer {
-            background: rgba(10, 10, 26, 0.9);
-            padding: 3rem 2rem;
-            text-align: center;
-            margin-top: 4rem;
-            border-top: 1px solid var(--nebula-purple);
+            font-weight: bold;
         }
     </style>
 </head>
 <body>
-    <div class="stars" id="stars"></div>
-    
-    <nav class="cosmic-nav">
-        <div class="nav-content">
-            <div class="logo">🚀 COSMIC PANEL</div>
-            <ul class="nav-links">
-                <li><a href="#home">Home</a></li>
-                <li><a href="#features">Features</a></li>
-                <li><a href="/packages.html">Packages</a></li>
-                <li><a href="/client.html">Client Panel</a></li>
-                <li><a href="/admin.html">Admin</a></li>
-            </ul>
+    <div class="container">
+        <div class="header">
+            <div class="logo">🚀 COSMIC GAME PANEL</div>
+            <p>Next-generation game server management with cosmic power</p>
         </div>
-    </nav>
-
-    <section class="hero" id="home">
-        <h1>Cosmic Game Panel</h1>
-        <p>Next-generation game server management with cosmic power</p>
-        <div class="cta-buttons">
-            <a href="/packages.html" class="btn btn-primary">View Packages</a>
-            <a href="/client.html" class="btn btn-secondary">Client Panel</a>
+        
+        <div class="nav">
+            <a href="/index.html">Home</a>
+            <a href="/packages.html">Packages</a>
+            <a href="/client.html">Client Panel</a>
+            <a href="/admin.html">Admin</a>
         </div>
-    </section>
-
-    <section class="features" id="features">
-        <h2 class="section-title">Cosmic Features</h2>
-        <div class="features-grid">
+        
+        <div class="features">
             <div class="feature-card">
-                <div class="feature-icon">🚀</div>
-                <h3>Lightning Fast</h3>
+                <h3>🚀 Lightning Fast</h3>
                 <p>Ultra-responsive control panel with real-time monitoring</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🔒</div>
-                <h3>Secure</h3>
+                <h3>🔒 Secure</h3>
                 <p>Military-grade encryption and secure access controls</p>
             </div>
             <div class="feature-card">
-                <div class="feature-icon">🌌</div>
-                <h3>Cosmic Scale</h3>
+                <h3>🌌 Cosmic Scale</h3>
                 <p>Manage unlimited servers across the galaxy</p>
             </div>
         </div>
-    </section>
-
-    <section class="stats">
-        <div class="stats-grid">
-            <div>
-                <div class="stat-number" id="servers-count">0</div>
+        
+        <div class="stats">
+            <div class="stat">
+                <div class="stat-number" id="servers-count">127</div>
                 <div>Active Servers</div>
             </div>
-            <div>
-                <div class="stat-number" id="players-count">0</div>
+            <div class="stat">
+                <div class="stat-number" id="players-count">842</div>
                 <div>Online Players</div>
             </div>
-            <div>
+            <div class="stat">
                 <div class="stat-number" id="uptime-count">99.9%</div>
                 <div>Uptime</div>
             </div>
-            <div>
-                <div class="stat-number" id="users-count">0</div>
-                <div>Happy Clients</div>
-            </div>
         </div>
-    </section>
-
-    <footer class="cosmic-footer">
-        <p>&copy; 2024 Cosmic Game Panel. All rights reserved.</p>
-        <p>Reach for the stars 🚀</p>
-    </footer>
-
-    <script>
-        // Create stars
-        function createStars() {
-            const stars = document.getElementById('stars');
-            for (let i = 0; i < 200; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                star.style.width = Math.random() * 2 + 'px';
-                star.style.height = star.style.width;
-                star.style.left = Math.random() * 100 + '%';
-                star.style.top = Math.random() * 100 + '%';
-                star.style.animationDelay = Math.random() * 5 + 's';
-                stars.appendChild(star);
-            }
-        }
-
-        // Animate numbers
-        function animateValue(id, start, end, duration) {
-            const obj = document.getElementById(id);
-            let startTimestamp = null;
-            const step = (timestamp) => {
-                if (!startTimestamp) startTimestamp = timestamp;
-                const progress = Math.min((timestamp - startTimestamp) / duration, 1);
-                const value = Math.floor(progress * (end - start) + start);
-                obj.innerHTML = value + (id === 'uptime-count' ? '%' : '');
-                if (progress < 1) {
-                    window.requestAnimationFrame(step);
-                }
-            };
-            window.requestAnimationFrame(step);
-        }
-
-        // Initialize
-        createStars();
-        setTimeout(() => {
-            animateValue('servers-count', 0, 127, 2000);
-            animateValue('players-count', 0, 842, 2500);
-            animateValue('users-count', 0, 356, 3000);
-        }, 1000);
-    </script>
+    </div>
 </body>
 </html>
 EOF
@@ -535,240 +305,104 @@ EOF
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Packages - Cosmic Game Panel</title>
     <style>
-        /* Same cosmic styles as index.html */
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@300;400;500;600&display=swap');
-        
-        :root {
-            --cosmic-dark: #0a0a1a;
-            --nebula-purple: #8b5cf6;
-            --star-blue: #3b82f6;
-            --galaxy-cyan: #06b6d4;
-            --planet-green: #10b981;
-            --comet-yellow: #f59e0b;
-            --nova-red: #ef4444;
-            --quasar-orange: #f97316;
-            --space-white: #ffffff;
-            --cosmic-gradient: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
-        }
-        
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--cosmic-gradient);
-            color: var(--space-white);
-            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
         }
         
-        .stars { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: -1; }
-        .star { position: absolute; background: white; border-radius: 50%; animation: twinkle 5s infinite; }
-        
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
-        }
-        
-        .cosmic-nav {
-            background: rgba(10, 10, 26, 0.9);
-            backdrop-filter: blur(20px);
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--nebula-purple);
-        }
-        
-        .nav-content {
+        .container {
             max-width: 1200px;
             margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
         
-        .logo {
-            font-family: 'Orbitron', monospace;
-            font-size: 1.8rem;
-            background: linear-gradient(45deg, var(--galaxy-cyan), var(--nebula-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .nav-links {
-            display: flex;
-            gap: 2rem;
-            list-style: none;
-        }
-        
-        .nav-links a {
-            color: var(--space-white);
-            text-decoration: none;
-            transition: color 0.3s;
-        }
-        
-        .packages-container {
-            max-width: 1200px;
-            margin: 2rem auto;
-            padding: 2rem;
-        }
-        
-        .section-title {
-            text-align: center;
-            font-family: 'Orbitron', monospace;
-            font-size: 2.5rem;
-            margin-bottom: 3rem;
-        }
-        
-        .packages-grid {
+        .packages {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
             gap: 2rem;
-        }
-        
-        .package-card {
-            background: rgba(30, 27, 75, 0.6);
-            border-radius: 15px;
-            padding: 2rem;
-            border: 1px solid;
-            transition: transform 0.3s;
-            position: relative;
-        }
-        
-        .package-card.popular {
-            border-color: var(--comet-yellow);
-            transform: scale(1.05);
-        }
-        
-        .package-card:hover {
-            transform: translateY(-10px);
-        }
-        
-        .popular-badge {
-            position: absolute;
-            top: -10px;
-            right: 20px;
-            background: var(--comet-yellow);
-            color: black;
-            padding: 0.5rem 1rem;
-            border-radius: 20px;
-            font-weight: bold;
-        }
-        
-        .package-header {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        
-        .package-price {
-            font-family: 'Orbitron', monospace;
-            font-size: 3rem;
-            color: var(--planet-green);
-        }
-        
-        .package-features {
-            list-style: none;
             margin: 2rem 0;
         }
         
-        .package-features li {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
+        .package {
+            background: rgba(30, 27, 75, 0.6);
+            padding: 2rem;
+            border-radius: 15px;
+            border: 1px solid #8b5cf6;
+            text-align: center;
+        }
+        
+        .package.popular {
+            border-color: #f59e0b;
+            transform: scale(1.05);
+        }
+        
+        .price {
+            font-size: 2.5rem;
+            color: #10b981;
+            margin: 1rem 0;
         }
         
         .btn {
-            display: block;
-            width: 100%;
-            padding: 1rem;
-            text-align: center;
-            background: var(--nebula-purple);
+            display: inline-block;
+            padding: 1rem 2rem;
+            background: #8b5cf6;
             color: white;
             text-decoration: none;
             border-radius: 8px;
-            font-weight: bold;
-            transition: all 0.3s;
-        }
-        
-        .btn:hover {
-            background: var(--galaxy-cyan);
-            transform: translateY(-2px);
+            margin-top: 1rem;
         }
     </style>
 </head>
 <body>
-    <div class="stars" id="stars"></div>
-    
-    <nav class="cosmic-nav">
-        <div class="nav-content">
-            <div class="logo">🚀 COSMIC PANEL</div>
-            <ul class="nav-links">
-                <li><a href="/index.html">Home</a></li>
-                <li><a href="/packages.html">Packages</a></li>
-                <li><a href="/client.html">Client Panel</a></li>
-                <li><a href="/admin.html">Admin</a></li>
-            </ul>
-        </div>
-    </nav>
-
-    <div class="packages-container">
-        <h2 class="section-title">Cosmic Packages</h2>
-        <div class="packages-grid" id="packages-grid">
-            <!-- Packages will be loaded by JavaScript -->
+    <div class="container">
+        <h1 style="text-align: center;">🚀 Cosmic Packages</h1>
+        <div class="packages">
+            <div class="package">
+                <h3>Starter Pack</h3>
+                <div class="price">$9.99</div>
+                <ul style="text-align: left;">
+                    <li>🔄 2GB RAM</li>
+                    <li>⚡ 1 Core CPU</li>
+                    <li>💾 10GB Storage</li>
+                    <li>👥 10-20 Players</li>
+                </ul>
+                <a href="/client.html" class="btn">Get Started</a>
+            </div>
+            
+            <div class="package popular">
+                <h3>Pro Gamer</h3>
+                <div class="price">$19.99</div>
+                <ul style="text-align: left;">
+                    <li>🔄 4GB RAM</li>
+                    <li>⚡ 2 Cores CPU</li>
+                    <li>💾 25GB Storage</li>
+                    <li>👥 20-50 Players</li>
+                </ul>
+                <a href="/client.html" class="btn">Get Started</a>
+            </div>
+            
+            <div class="package">
+                <h3>Enterprise</h3>
+                <div class="price">$49.99</div>
+                <ul style="text-align: left;">
+                    <li>🔄 8GB RAM</li>
+                    <li>⚡ 4 Cores CPU</li>
+                    <li>💾 50GB Storage</li>
+                    <li>👥 Unlimited Players</li>
+                </ul>
+                <a href="/client.html" class="btn">Get Started</a>
+            </div>
         </div>
     </div>
-
-    <script>
-        function createStars() {
-            const stars = document.getElementById('stars');
-            for (let i = 0; i < 150; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                star.style.width = Math.random() * 2 + 'px';
-                star.style.height = star.style.width;
-                star.style.left = Math.random() * 100 + '%';
-                star.style.top = Math.random() * 100 + '%';
-                star.style.animationDelay = Math.random() * 5 + 's';
-                stars.appendChild(star);
-            }
-        }
-
-        async function loadPackages() {
-            try {
-                const response = await fetch('/api/packages');
-                const data = await response.json();
-                displayPackages(data.packages);
-            } catch (error) {
-                console.error('Error loading packages:', error);
-            }
-        }
-
-        function displayPackages(packages) {
-            const grid = document.getElementById('packages-grid');
-            grid.innerHTML = packages.map(pkg => `
-                <div class="package-card ${pkg.popular ? 'popular' : ''}">
-                    ${pkg.popular ? '<div class="popular-badge">🔥 MOST POPULAR</div>' : ''}
-                    <div class="package-header">
-                        <h3>${pkg.name}</h3>
-                        <div class="package-price">$${pkg.price}</div>
-                        <small>per month</small>
-                    </div>
-                    <ul class="package-features">
-                        <li>🔄 ${pkg.ram} RAM</li>
-                        <li>⚡ ${pkg.cpu} CPU</li>
-                        <li>💾 ${pkg.storage} Storage</li>
-                        <li>👥 ${pkg.players} Players</li>
-                        <li>🛟 ${pkg.support} Support</li>
-                    </ul>
-                    <a href="/client.html" class="btn">Get Started</a>
-                </div>
-            `).join('');
-        }
-
-        createStars();
-        loadPackages();
-    </script>
 </body>
 </html>
 EOF
 
     create_client_panel
     create_admin_panel
-    create_api_scripts
+    create_api_server
 }
 
 create_client_panel() {
@@ -780,91 +414,38 @@ create_client_panel() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Client Panel - Cosmic Game Panel</title>
     <style>
-        /* Cosmic styles implementation */
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@300;400;500;600&display=swap');
-        
-        :root {
-            --cosmic-dark: #0a0a1a;
-            --nebula-purple: #8b5cf6;
-            --star-blue: #3b82f6;
-            --galaxy-cyan: #06b6d4;
-            --planet-green: #10b981;
-            --comet-yellow: #f59e0b;
-            --nova-red: #ef4444;
-            --quasar-orange: #f97316;
-            --space-white: #ffffff;
-            --cosmic-gradient: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
-        }
-        
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--cosmic-gradient);
-            color: var(--space-white);
-            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
         }
         
-        .stars { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: -1; }
-        .star { position: absolute; background: white; border-radius: 50%; animation: twinkle 5s infinite; }
-        
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
-        }
-        
-        .cosmic-nav {
-            background: rgba(10, 10, 26, 0.9);
-            backdrop-filter: blur(20px);
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--nebula-purple);
-        }
-        
-        .nav-content {
-            max-width: 1400px;
+        .container {
+            max-width: 1200px;
             margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
         }
         
-        .logo {
-            font-family: 'Orbitron', monospace;
-            font-size: 1.8rem;
-            background: linear-gradient(45deg, var(--galaxy-cyan), var(--nebula-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .client-container {
-            max-width: 1400px;
-            margin: 2rem auto;
-            padding: 2rem;
-        }
-        
-        .servers-grid {
+        .servers {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 2rem;
-            margin-bottom: 3rem;
+            margin: 2rem 0;
         }
         
         .server-card {
             background: rgba(30, 27, 75, 0.6);
+            padding: 1.5rem;
             border-radius: 15px;
-            padding: 2rem;
-            border: 1px solid var(--nebula-purple);
+            border: 1px solid #8b5cf6;
         }
         
         .server-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
-        }
-        
-        .server-icon {
-            font-size: 2.5rem;
-            margin-right: 1rem;
         }
         
         .status {
@@ -873,21 +454,14 @@ create_client_panel() {
             font-weight: bold;
         }
         
-        .status-running { background: var(--planet-green); color: black; }
-        .status-stopped { background: var(--nova-red); color: white; }
-        
-        .server-info { margin: 1.5rem 0; }
-        .info-item { 
-            display: flex;
-            justify-content: space-between;
-            padding: 0.5rem 0;
-            border-bottom: 1px solid rgba(255,255,255,0.1);
-        }
+        .status.running { background: #10b981; color: black; }
+        .status.stopped { background: #ef4444; color: white; }
         
         .controls {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
             gap: 0.5rem;
+            margin-top: 1rem;
         }
         
         .btn {
@@ -896,177 +470,57 @@ create_client_panel() {
             border-radius: 6px;
             cursor: pointer;
             font-weight: bold;
-            transition: all 0.3s;
         }
         
-        .btn-start { background: var(--planet-green); }
-        .btn-stop { background: var(--nova-red); }
-        .btn-restart { background: var(--comet-yellow); }
-        .btn-console { background: var(--star-blue); }
-        
-        .btn:hover {
-            transform: translateY(-2px);
-            opacity: 0.9;
-        }
-        
-        .console-container {
-            background: rgba(0,0,0,0.8);
-            border-radius: 10px;
-            padding: 1.5rem;
-            border: 1px solid var(--galaxy-cyan);
-        }
-        
-        .console-output {
-            height: 300px;
-            overflow-y: auto;
-            background: black;
-            padding: 1rem;
-            border-radius: 5px;
-            margin-bottom: 1rem;
-            font-family: monospace;
-        }
-        
-        .console-input {
-            width: 100%;
-            padding: 1rem;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid var(--galaxy-cyan);
-            border-radius: 5px;
-            color: white;
-            font-family: monospace;
-        }
+        .btn-start { background: #10b981; }
+        .btn-stop { background: #ef4444; }
+        .btn-restart { background: #f59e0b; }
     </style>
 </head>
 <body>
-    <div class="stars" id="stars"></div>
-    
-    <nav class="cosmic-nav">
-        <div class="nav-content">
-            <div class="logo">🚀 CLIENT PANEL</div>
-            <div>
-                <a href="/index.html" style="color: var(--space-white); text-decoration: none; margin-right: 1rem;">Home</a>
-                <a href="/packages.html" style="color: var(--space-white); text-decoration: none;">Packages</a>
-            </div>
-        </div>
-    </nav>
-
-    <div class="client-container">
-        <h2 style="font-family: 'Orbitron'; margin-bottom: 2rem; text-align: center;">Your Cosmic Servers</h2>
+    <div class="container">
+        <h1>🎮 Your Cosmic Servers</h1>
         
-        <div class="servers-grid" id="servers-grid">
-            <!-- Servers will be loaded dynamically -->
-        </div>
-
-        <div class="console-container">
-            <h3>Server Console</h3>
-            <div class="console-output" id="console-output">
-                <div>🚀 Cosmic Client Panel initialized...</div>
+        <div class="servers" id="servers-container">
+            <div class="server-card">
+                <div class="server-header">
+                    <div>
+                        <h3>FiveM Roleplay</h3>
+                        <small>Port: 30120</small>
+                    </div>
+                    <div class="status running">RUNNING</div>
+                </div>
+                <div class="server-info">
+                    <div>Players: 12/32</div>
+                    <div>Uptime: 8h</div>
+                </div>
+                <div class="controls">
+                    <button class="btn btn-stop">Stop</button>
+                    <button class="btn btn-restart">Restart</button>
+                    <button class="btn" style="background: #3b82f6;">Console</button>
+                </div>
             </div>
-            <input type="text" class="console-input" id="console-input" placeholder="Enter command...">
+            
+            <div class="server-card">
+                <div class="server-header">
+                    <div>
+                        <h3>Minecraft Survival</h3>
+                        <small>Port: 25565</small>
+                    </div>
+                    <div class="status stopped">STOPPED</div>
+                </div>
+                <div class="server-info">
+                    <div>Players: 0/20</div>
+                    <div>Uptime: 0h</div>
+                </div>
+                <div class="controls">
+                    <button class="btn btn-start">Start</button>
+                    <button class="btn btn-restart">Restart</button>
+                    <button class="btn" style="background: #3b82f6;">Console</button>
+                </div>
+            </div>
         </div>
     </div>
-
-    <script>
-        function createStars() {
-            const stars = document.getElementById('stars');
-            for (let i = 0; i < 150; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                star.style.width = Math.random() * 2 + 'px';
-                star.style.height = star.style.width;
-                star.style.left = Math.random() * 100 + '%';
-                star.style.top = Math.random() * 100 + '%';
-                star.style.animationDelay = Math.random() * 5 + 's';
-                stars.appendChild(star);
-            }
-        }
-
-        async function loadServers() {
-            try {
-                const response = await fetch('/api/servers');
-                const servers = await response.json();
-                displayServers(servers);
-            } catch (error) {
-                console.error('Error loading servers:', error);
-            }
-        }
-
-        function displayServers(servers) {
-            const grid = document.getElementById('servers-grid');
-            grid.innerHTML = Object.entries(servers).map(([id, server]) => `
-                <div class="server-card">
-                    <div class="server-header">
-                        <div style="display: flex; align-items: center;">
-                            <div class="server-icon">🎮</div>
-                            <div>
-                                <h3>${server.name}</h3>
-                                <small>Port: ${server.port}</small>
-                            </div>
-                        </div>
-                        <div class="status status-${server.status}">${server.status.toUpperCase()}</div>
-                    </div>
-                    <div class="server-info">
-                        <div class="info-item">
-                            <span>Players:</span>
-                            <span>${server.players}/${server.max_players}</span>
-                        </div>
-                        <div class="info-item">
-                            <span>Uptime:</span>
-                            <span>${server.uptime}h</span>
-                        </div>
-                    </div>
-                    <div class="controls">
-                        <button class="btn btn-start" onclick="controlServer('${id}', 'start')">Start</button>
-                        <button class="btn btn-stop" onclick="controlServer('${id}', 'stop')">Stop</button>
-                        <button class="btn btn-restart" onclick="controlServer('${id}', 'restart')">Restart</button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        async function controlServer(server, action) {
-            try {
-                const response = await fetch('/api/control', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ server, action })
-                });
-                const result = await response.json();
-                addToConsole(`Server ${server}: ${action} command sent`);
-                loadServers();
-            } catch (error) {
-                addToConsole(`Error: ${error.message}`);
-            }
-        }
-
-        function addToConsole(message) {
-            const console = document.getElementById('console-output');
-            const entry = document.createElement('div');
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-            console.appendChild(entry);
-            console.scrollTop = console.scrollHeight;
-        }
-
-        // Initialize
-        createStars();
-        loadServers();
-        setInterval(loadServers, 5000);
-
-        // Console input handler
-        document.getElementById('console-input').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                const command = this.value;
-                addToConsole(`> ${command}`);
-                this.value = '';
-                // Send command to server
-                fetch('/api/command', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ command })
-                });
-            }
-        });
-    </script>
 </body>
 </html>
 EOF
@@ -1081,86 +535,20 @@ create_admin_panel() {
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Admin Panel - Cosmic Game Panel</title>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Space+Grotesk:wght@300;400;500;600&display=swap');
-        
-        :root {
-            --cosmic-dark: #0a0a1a;
-            --nebula-purple: #8b5cf6;
-            --star-blue: #3b82f6;
-            --galaxy-cyan: #06b6d4;
-            --planet-green: #10b981;
-            --comet-yellow: #f59e0b;
-            --nova-red: #ef4444;
-            --quasar-orange: #f97316;
-            --space-white: #ffffff;
-            --cosmic-gradient: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
-        }
-        
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        
         body {
-            font-family: 'Space Grotesk', sans-serif;
-            background: var(--cosmic-gradient);
-            color: var(--space-white);
-            min-height: 100vh;
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #0a0a1a 0%, #1e1b4b 100%);
+            color: white;
+            margin: 0;
+            padding: 20px;
         }
         
-        .stars { position: fixed; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: -1; }
-        .star { position: absolute; background: white; border-radius: 50%; animation: twinkle 5s infinite; }
-        
-        @keyframes twinkle {
-            0%, 100% { opacity: 0.3; } 50% { opacity: 1; }
-        }
-        
-        .login-container {
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            min-height: 100vh;
-            padding: 2rem;
-        }
-        
-        .login-box {
-            background: rgba(30, 27, 75, 0.8);
-            padding: 3rem;
-            border-radius: 15px;
-            border: 1px solid var(--nebula-purple);
-            width: 100%;
-            max-width: 400px;
-            backdrop-filter: blur(10px);
-        }
-        
-        .admin-container {
-            display: none;
+        .container {
             max-width: 1400px;
             margin: 0 auto;
-            padding: 2rem;
         }
         
-        .cosmic-nav {
-            background: rgba(10, 10, 26, 0.9);
-            backdrop-filter: blur(20px);
-            padding: 1rem 2rem;
-            border-bottom: 1px solid var(--nebula-purple);
-        }
-        
-        .nav-content {
-            max-width: 1400px;
-            margin: 0 auto;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .logo {
-            font-family: 'Orbitron', monospace;
-            font-size: 1.8rem;
-            background: linear-gradient(45deg, var(--galaxy-cyan), var(--nebula-purple));
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-        
-        .admin-stats {
+        .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
             gap: 1rem;
@@ -1172,13 +560,12 @@ create_admin_panel() {
             padding: 1.5rem;
             border-radius: 10px;
             text-align: center;
-            border: 1px solid var(--star-blue);
+            border: 1px solid #3b82f6;
         }
         
         .stat-number {
-            font-family: 'Orbitron', monospace;
             font-size: 2rem;
-            color: var(--planet-green);
+            color: #10b981;
         }
         
         .admin-grid {
@@ -1192,7 +579,7 @@ create_admin_panel() {
             background: rgba(30, 27, 75, 0.6);
             padding: 2rem;
             border-radius: 15px;
-            border: 1px solid var(--nebula-purple);
+            border: 1px solid #8b5cf6;
         }
         
         .user-list, .server-list {
@@ -1216,62 +603,31 @@ create_admin_panel() {
             border-radius: 5px;
             cursor: pointer;
             font-weight: bold;
-            transition: all 0.3s;
         }
         
-        .btn-danger { background: var(--nova-red); color: white; }
-        .btn-warning { background: var(--comet-yellow); color: black; }
-        .btn-primary { background: var(--nebula-purple); color: white; }
-        
-        input {
-            width: 100%;
-            padding: 1rem;
-            margin: 0.5rem 0;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid var(--galaxy-cyan);
-            border-radius: 5px;
-            color: white;
-        }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn-warning { background: #f59e0b; color: black; }
     </style>
 </head>
 <body>
-    <div class="stars" id="stars"></div>
-    
-    <!-- Login Screen -->
-    <div class="login-container" id="login-container">
-        <div class="login-box">
-            <h2 style="text-align: center; margin-bottom: 2rem; font-family: 'Orbitron';">🔐 Admin Login</h2>
-            <input type="text" id="username" placeholder="Username" style="margin-bottom: 1rem;">
-            <input type="password" id="password" placeholder="Password">
-            <button class="btn btn-primary" onclick="login()" style="width: 100%; margin-top: 1rem;">Login</button>
-            <div id="login-error" style="color: var(--nova-red); margin-top: 1rem; display: none;"></div>
-        </div>
-    </div>
-    
-    <!-- Admin Panel -->
-    <div class="admin-container" id="admin-container">
-        <nav class="cosmic-nav">
-            <div class="nav-content">
-                <div class="logo">🚀 ADMIN PANEL</div>
-                <button class="btn btn-danger" onclick="logout()">Logout</button>
-            </div>
-        </nav>
+    <div class="container">
+        <h1>🔐 Cosmic Admin Panel</h1>
         
-        <div class="admin-stats">
+        <div class="stats">
             <div class="stat-card">
-                <div class="stat-number" id="total-users">0</div>
+                <div class="stat-number">5</div>
                 <div>Total Users</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number" id="total-servers">0</div>
+                <div class="stat-number">2</div>
                 <div>Active Servers</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number" id="system-load">0%</div>
+                <div class="stat-number">45%</div>
                 <div>System Load</div>
             </div>
             <div class="stat-card">
-                <div class="stat-number" id="total-revenue">$0</div>
+                <div class="stat-number">$99.95</div>
                 <div>Monthly Revenue</div>
             </div>
         </div>
@@ -1279,580 +635,270 @@ create_admin_panel() {
         <div class="admin-grid">
             <div class="admin-section">
                 <h3>👥 User Management</h3>
-                <div class="user-list" id="user-list">
-                    <!-- Users will be populated here -->
-                </div>
-                <div style="margin-top: 1rem;">
-                    <input type="text" id="new-username" placeholder="New username">
-                    <input type="password" id="new-password" placeholder="Password">
-                    <button class="btn btn-primary" onclick="createUser()" style="width: 100%;">Create User</button>
+                <div class="user-list">
+                    <div class="user-item">
+                        <div>
+                            <strong>admin</strong>
+                            <div style="font-size: 0.8em; color: #ccc;">admin@cosmicpanel.com</div>
+                        </div>
+                        <span>Admin</span>
+                    </div>
+                    <div class="user-item">
+                        <div>
+                            <strong>john_doe</strong>
+                            <div style="font-size: 0.8em; color: #ccc;">john@example.com</div>
+                        </div>
+                        <button class="btn btn-danger">Delete</button>
+                    </div>
                 </div>
             </div>
             
             <div class="admin-section">
                 <h3>🎮 Server Management</h3>
-                <div class="server-list" id="server-list">
-                    <!-- Servers will be populated here -->
+                <div class="server-list">
+                    <div class="server-item">
+                        <div>
+                            <strong>FiveM Roleplay</strong>
+                            <div style="font-size: 0.8em; color: #ccc;">Status: Running</div>
+                        </div>
+                        <button class="btn btn-warning">Restart</button>
+                    </div>
+                    <div class="server-item">
+                        <div>
+                            <strong>Minecraft Survival</strong>
+                            <div style="font-size: 0.8em; color: #ccc;">Status: Stopped</div>
+                        </div>
+                        <button class="btn btn-warning">Restart</button>
+                    </div>
                 </div>
-                <button class="btn btn-warning" onclick="restartAllServers()" style="width: 100%; margin-top: 1rem;">Restart All Servers</button>
             </div>
         </div>
     </div>
-
-    <script>
-        function createStars() {
-            const stars = document.getElementById('stars');
-            for (let i = 0; i < 150; i++) {
-                const star = document.createElement('div');
-                star.className = 'star';
-                star.style.width = Math.random() * 2 + 'px';
-                star.style.height = star.style.width;
-                star.style.left = Math.random() * 100 + '%';
-                star.style.top = Math.random() * 100 + '%';
-                star.style.animationDelay = Math.random() * 5 + 's';
-                stars.appendChild(star);
-            }
-        }
-
-        function login() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            
-            fetch('/api/admin/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            })
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    document.getElementById('login-container').style.display = 'none';
-                    document.getElementById('admin-container').style.display = 'block';
-                    loadAdminData();
-                } else {
-                    document.getElementById('login-error').style.display = 'block';
-                    document.getElementById('login-error').textContent = data.message;
-                }
-            });
-        }
-
-        function logout() {
-            document.getElementById('login-container').style.display = 'flex';
-            document.getElementById('admin-container').style.display = 'none';
-        }
-
-        async function loadAdminData() {
-            // Load users
-            const usersResponse = await fetch('/api/admin/users');
-            const users = await usersResponse.json();
-            
-            // Load servers
-            const serversResponse = await fetch('/api/servers');
-            const servers = await serversResponse.json();
-            
-            updateAdminDisplay(users, servers);
-        }
-
-        function updateAdminDisplay(users, servers) {
-            // Update stats
-            document.getElementById('total-users').textContent = users.length + 1; // +1 for admin
-            document.getElementById('total-servers').textContent = Object.values(servers).filter(s => s.status === 'running').length;
-            document.getElementById('system-load').textContent = '45%';
-            document.getElementById('total-revenue').textContent = '$' + (users.length * 19.99).toFixed(2);
-            
-            // Update user list
-            const userList = document.getElementById('user-list');
-            userList.innerHTML = users.map(user => `
-                <div class="user-item">
-                    <div>
-                        <strong>${user.username}</strong>
-                        <div style="font-size: 0.8em; color: #ccc;">${user.email}</div>
-                    </div>
-                    <button class="btn btn-danger" onclick="deleteUser('${user.username}')">Delete</button>
-                </div>
-            `).join('');
-            
-            // Update server list
-            const serverList = document.getElementById('server-list');
-            serverList.innerHTML = Object.entries(servers).map(([id, server]) => `
-                <div class="server-item">
-                    <div>
-                        <strong>${server.name}</strong>
-                        <div style="font-size: 0.8em; color: #ccc;">Status: ${server.status}</div>
-                    </div>
-                    <div>
-                        <button class="btn btn-warning" onclick="restartServer('${id}')">Restart</button>
-                    </div>
-                </div>
-            `).join('');
-        }
-
-        function createUser() {
-            const username = document.getElementById('new-username').value;
-            const password = document.getElementById('new-password').value;
-            
-            fetch('/api/admin/users', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password })
-            })
-            .then(() => {
-                loadAdminData();
-                document.getElementById('new-username').value = '';
-                document.getElementById('new-password').value = '';
-            });
-        }
-
-        function deleteUser(username) {
-            fetch(`/api/admin/users/${username}`, { method: 'DELETE' })
-            .then(() => loadAdminData());
-        }
-
-        function restartServer(serverId) {
-            fetch('/api/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ server: serverId, action: 'restart' })
-            })
-            .then(() => loadAdminData());
-        }
-
-        function restartAllServers() {
-            fetch('/api/admin/restart-all', { method: 'POST' })
-            .then(() => loadAdminData());
-        }
-
-        // Initialize
-        createStars();
-        
-        // Check if already logged in
-        if (localStorage.getItem('adminLoggedIn') === 'true') {
-            document.getElementById('login-container').style.display = 'none';
-            document.getElementById('admin-container').style.display = 'block';
-            loadAdminData();
-        }
-    </script>
 </body>
 </html>
 EOF
 }
 
-create_api_scripts() {
-    cat > "$WEB_DIR/api.py" << 'EOF'
-#!/usr/bin/env python3
-from http.server import HTTPServer, BaseHTTPRequestHandler
-import json
-import os
-import subprocess
-import time
-import random
-from datetime import datetime
-import sqlite3
+create_api_server() {
+    cat > "$WEB_DIR/server.js" << 'EOF'
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
-PANEL_DIR = os.path.expanduser("~/cosmic-panel")
-DB_DIR = os.path.join(PANEL_DIR, "database")
-LOG_DIR = os.path.join(PANEL_DIR, "logs")
+const PANEL_DIR = '/tmp/cosmic-panel';
+const DB_DIR = path.join(PANEL_DIR, 'database');
+const WEB_DIR = path.join(PANEL_DIR, 'web');
 
-class CosmicAPIHandler(BaseHTTPRequestHandler):
-    def do_GET(self):
-        try:
-            if self.path == '/':
-                self.serve_file('index.html')
-            elif self.path == '/packages.html':
-                self.serve_file('packages.html')
-            elif self.path == '/client.html':
-                self.serve_file('client.html')
-            elif self.path == '/admin.html':
-                self.serve_file('admin.html')
-            elif self.path == '/api/packages':
-                self.serve_packages()
-            elif self.path == '/api/servers':
-                self.serve_servers()
-            elif self.path == '/api/admin/users':
-                self.serve_users()
-            elif self.path.startswith('/api/console/'):
-                server = self.path.split('/')[-1]
-                self.serve_console(server)
-            else:
-                self.serve_static()
-        except Exception as e:
-            self.send_error(500, str(e))
-    
-    def do_POST(self):
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            if self.path == '/api/control':
-                self.handle_control(data)
-            elif self.path == '/api/command':
-                self.handle_command(data)
-            elif self.path == '/api/admin/login':
-                self.handle_login(data)
-            elif self.path == '/api/admin/users':
-                self.handle_create_user(data)
-            elif self.path == '/api/admin/restart-all':
-                self.handle_restart_all()
-            else:
-                self.send_error(404)
-        except Exception as e:
-            self.send_error(500, str(e))
-    
-    def do_DELETE(self):
-        if self.path.startswith('/api/admin/users/'):
-            username = self.path.split('/')[-1]
-            self.handle_delete_user(username)
-        else:
-            self.send_error(404)
-    
-    def serve_file(self, filename):
-        filepath = os.path.join(PANEL_DIR, 'web', filename)
-        if os.path.exists(filepath):
-            with open(filepath, 'rb') as f:
-                content = f.read()
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            self.wfile.write(content)
-        else:
-            self.send_error(404)
-    
-    def serve_static(self):
-        filepath = os.path.join(PANEL_DIR, 'web', self.path[1:])
-        if os.path.exists(filepath):
-            with open(filepath, 'rb') as f:
-                content = f.read()
-            
-            content_type = 'text/html'
-            if self.path.endswith('.css'):
-                content_type = 'text/css'
-            elif self.path.endswith('.js'):
-                content_type = 'application/javascript'
-            elif self.path.endswith('.png'):
-                content_type = 'image/png'
-            elif self.path.endswith('.jpg'):
-                content_type = 'image/jpeg'
-            
-            self.send_response(200)
-            self.send_header('Content-type', content_type)
-            self.end_headers()
-            self.wfile.write(content)
-        else:
-            self.send_error(404)
-    
-    def serve_packages(self):
-        with open(os.path.join(DB_DIR, 'packages.json'), 'r') as f:
-            packages = json.load(f)
-        self.send_json_response(packages)
-    
-    def serve_servers(self):
-        with open(os.path.join(DB_DIR, 'servers.json'), 'r') as f:
-            servers = json.load(f)
+const MIME_TYPES = {
+    '.html': 'text/html',
+    '.css': 'text/css',
+    '.js': 'application/javascript',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg'
+};
+
+class CosmicServer {
+    constructor() {
+        this.server = http.createServer((req, res) => this.handleRequest(req, res));
+        this.port = process.env.PORT || 8080;
+    }
+
+    handleRequest(req, res) {
+        const url = new URL(req.url, `http://${req.headers.host}`);
         
-        # Update with real status
-        for server_id in servers:
-            servers[server_id]['status'] = self.get_server_status(server_id)
-            if servers[server_id]['status'] == 'running':
-                servers[server_id]['players'] = random.randint(0, servers[server_id]['max_players'] // 2)
-                servers[server_id]['uptime'] = random.randint(1, 24)
-        
-        self.send_json_response(servers)
-    
-    def serve_users(self):
-        with open(os.path.join(DB_DIR, 'users.json'), 'r') as f:
-            users_data = json.load(f)
-        
-        users = users_data.get('clients', [])
-        self.send_json_response(users)
-    
-    def serve_console(self, server):
-        log_file = os.path.join(LOG_DIR, f"{server}.log")
-        logs = []
-        if os.path.exists(log_file):
-            with open(log_file, 'r') as f:
-                logs = f.readlines()[-20:]
-        self.send_json_response({"logs": logs})
-    
-    def handle_control(self, data):
-        server = data.get('server')
-        action = data.get('action')
-        
-        # Simulate server control
-        result = f"Server {server} {action} command received"
-        
-        # Update server status in database
-        with open(os.path.join(DB_DIR, 'servers.json'), 'r+') as f:
-            servers = json.load(f)
-            if server in servers:
-                if action == 'start':
-                    servers[server]['status'] = 'running'
-                elif action in ['stop', 'restart']:
-                    servers[server]['status'] = 'stopped'
-                    if action == 'restart':
-                        servers[server]['status'] = 'running'
-            f.seek(0)
-            json.dump(servers, f, indent=2)
-            f.truncate()
-        
-        self.send_json_response({"status": "success", "result": result})
-    
-    def handle_command(self, data):
-        command = data.get('command')
-        # Log command
-        with open(os.path.join(LOG_DIR, "commands.log"), "a") as f:
-            f.write(f"[{datetime.now()}] Command: {command}\n")
-        self.send_json_response({"status": "received"})
-    
-    def handle_login(self, data):
-        username = data.get('username')
-        password = data.get('password')
-        
-        with open(os.path.join(DB_DIR, 'users.json'), 'r') as f:
-            users = json.load(f)
-        
-        if username == users.get('admin', {}).get('username', 'admin') and password == users.get('admin', {}).get('password', 'cosmic123'):
-            self.send_json_response({"success": True})
-        else:
-            self.send_json_response({"success": False, "message": "Invalid credentials"})
-    
-    def handle_create_user(self, data):
-        username = data.get('username')
-        password = data.get('password')
-        
-        with open(os.path.join(DB_DIR, 'users.json'), 'r+') as f:
-            users = json.load(f)
-            new_user = {
-                "username": username,
-                "password": password,
-                "email": f"{username}@cosmicpanel.com",
-                "role": "client",
-                "created": datetime.now().strftime("%Y-%m-%d")
+        try {
+            if (req.method === 'GET') {
+                this.handleGet(url, req, res);
+            } else if (req.method === 'POST') {
+                this.handlePost(url, req, res);
+            } else {
+                this.sendResponse(res, 404, { error: 'Not found' });
             }
-            users['clients'].append(new_user)
-            f.seek(0)
-            json.dump(users, f, indent=2)
-            f.truncate()
+        } catch (error) {
+            this.sendResponse(res, 500, { error: error.message });
+        }
+    }
+
+    handleGet(url, req, res) {
+        if (url.pathname === '/') {
+            this.serveFile(res, 'index.html');
+        } else if (url.pathname === '/api/servers') {
+            this.serveServers(res);
+        } else if (url.pathname === '/api/packages') {
+            this.servePackages(res);
+        } else {
+            this.serveStatic(url.pathname, res);
+        }
+    }
+
+    handlePost(url, req, res) {
+        let body = '';
+        req.on('data', chunk => body += chunk);
+        req.on('end', () => {
+            try {
+                const data = JSON.parse(body);
+                
+                if (url.pathname === '/api/control') {
+                    this.handleServerControl(data, res);
+                } else if (url.pathname === '/api/admin/login') {
+                    this.handleAdminLogin(data, res);
+                } else {
+                    this.sendResponse(res, 404, { error: 'Not found' });
+                }
+            } catch (error) {
+                this.sendResponse(res, 400, { error: 'Invalid JSON' });
+            }
+        });
+    }
+
+    serveFile(res, filename) {
+        const filepath = path.join(WEB_DIR, filename);
+        this.sendFile(res, filepath);
+    }
+
+    serveStatic(filepath, res) {
+        const fullPath = path.join(WEB_DIR, filepath.substring(1));
+        this.sendFile(res, fullPath);
+    }
+
+    sendFile(res, filepath) {
+        if (!fs.existsSync(filepath)) {
+            this.sendResponse(res, 404, { error: 'File not found' });
+            return;
+        }
+
+        const ext = path.extname(filepath);
+        const mimeType = MIME_TYPES[ext] || 'text/plain';
         
-        self.send_json_response({"success": True})
-    
-    def handle_delete_user(self, username):
-        with open(os.path.join(DB_DIR, 'users.json'), 'r+') as f:
-            users = json.load(f)
-            users['clients'] = [u for u in users['clients'] if u['username'] != username]
-            f.seek(0)
-            json.dump(users, f, indent=2)
-            f.truncate()
+        fs.readFile(filepath, (err, data) => {
+            if (err) {
+                this.sendResponse(res, 500, { error: 'Error reading file' });
+                return;
+            }
+
+            res.writeHead(200, { 'Content-Type': mimeType });
+            res.end(data);
+        });
+    }
+
+    serveServers(res) {
+        try {
+            const serversPath = path.join(DB_DIR, 'servers.json');
+            const serversData = fs.readFileSync(serversPath, 'utf8');
+            const servers = JSON.parse(serversData);
+            
+            // Update with mock data
+            Object.keys(servers).forEach(serverId => {
+                servers[serverId].players = Math.floor(Math.random() * servers[serverId].max_players);
+                servers[serverId].uptime = Math.floor(Math.random() * 24);
+            });
+            
+            this.sendResponse(res, 200, servers);
+        } catch (error) {
+            this.sendResponse(res, 500, { error: 'Error reading servers' });
+        }
+    }
+
+    servePackages(res) {
+        try {
+            const packagesPath = path.join(DB_DIR, 'packages.json');
+            const packagesData = fs.readFileSync(packagesPath, 'utf8');
+            const packages = JSON.parse(packagesData);
+            this.sendResponse(res, 200, packages);
+        } catch (error) {
+            this.sendResponse(res, 500, { error: 'Error reading packages' });
+        }
+    }
+
+    handleServerControl(data, res) {
+        const { server, action } = data;
         
-        self.send_json_response({"success": True})
-    
-    def handle_restart_all(self):
-        with open(os.path.join(DB_DIR, 'servers.json'), 'r+') as f:
-            servers = json.load(f)
-            for server in servers:
-                servers[server]['status'] = 'running'
-            f.seek(0)
-            json.dump(servers, f, indent=2)
-            f.truncate()
+        // Simulate server control
+        setTimeout(() => {
+            this.sendResponse(res, 200, { 
+                status: 'success', 
+                message: `Server ${server} ${action} command received` 
+            });
+        }, 1000);
+    }
+
+    handleAdminLogin(data, res) {
+        const { username, password } = data;
         
-        self.send_json_response({"success": True})
-    
-    def get_server_status(self, server_id):
-        # Simulate checking server status
-        statuses = ['running', 'stopped']
-        return random.choice(statuses)
-    
-    def send_json_response(self, data):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-    
-    def log_message(self, format, *args):
-        pass
+        if (username === 'admin' && password === 'cosmic123') {
+            this.sendResponse(res, 200, { success: true });
+        } else {
+            this.sendResponse(res, 401, { success: false, message: 'Invalid credentials' });
+        }
+    }
 
-def start_api_server():
-    port = 8080
-    server = HTTPServer(('0.0.0.0', port), CosmicAPIHandler)
-    print(f"🚀 Cosmic API Server running on port {port}")
-    server.serve_forever()
+    sendResponse(res, statusCode, data) {
+        res.writeHead(statusCode, {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        });
+        res.end(JSON.stringify(data));
+    }
 
-if __name__ == '__main__':
-    start_api_server()
-EOF
-
-    # Uruchom skrypt API
-    chmod +x "$WEB_DIR/api.py"
+    start() {
+        this.server.listen(this.port, () => {
+            console.log(`🚀 Cosmic Game Panel running on port ${this.port}`);
+            console.log(`🌐 Web Interface: http://localhost:${this.port}`);
+            console.log(`👤 Admin Panel: http://localhost:${this.port}/admin.html`);
+            console.log(`🎮 Client Panel: http://localhost:${this.port}/client.html`);
+        });
+    }
 }
 
-create_config_files() {
-    echo -e "${COMET_YELLOW}📄 Tworzenie plików konfiguracyjnych...${NC}"
-    
-    # Konfiguracja serwerów
-    for server in fivem minecraft discord-bot valheim; do
-        mkdir -p "$SERVER_DIR/$server"
-        cat > "$SERVER_DIR/$server/fake_server.sh" << EOF
-#!/bin/bash
-echo "🚀 Starting $server server..."
-echo "[\\$(date)] $server server started on port \\$(grep -oP '\"port\":\\s*\\K\\d+' $DB_DIR/servers.json | head -1)"
-while true; do
-    echo "[\\$(date)] $server heartbeat - Status: Running"
-    sleep 30
-done
+// Start the server
+const cosmicServer = new CosmicServer();
+cosmicServer.start();
 EOF
-        chmod +x "$SERVER_DIR/$server/fake_server.sh"
-    done
-}
-
-create_servers() {
-    echo -e "${COMET_YELLOW}🎮 Przygotowywanie serwerów...${NC}"
-    
-    # Skrypty kontroli serwerów
-    mkdir -p "$PANEL_DIR/scripts"
-    
-    for server in fivem minecraft discord-bot valheim; do
-        cat > "$PANEL_DIR/scripts/${server}_start.sh" << EOF
-#!/bin/bash
-echo "🚀 Starting $server server..."
-cd "$SERVER_DIR/$server"
-screen -dmS $server ./fake_server.sh
-echo "✅ $server server started"
-EOF
-
-        cat > "$PANEL_DIR/scripts/${server}_stop.sh" << EOF
-#!/bin/bash
-echo "🛑 Stopping $server server..."
-screen -S $server -X quit
-echo "✅ $server server stopped"
-EOF
-
-        cat > "$PANEL_DIR/scripts/${server}_restart.sh" << EOF
-#!/bin/bash
-echo "🔁 Restarting $server server..."
-screen -S $server -X quit
-sleep 2
-cd "$SERVER_DIR/$server"
-screen -dmS $server ./fake_server.sh
-echo "✅ $server server restarted"
-EOF
-    done
-    
-    chmod +x $PANEL_DIR/scripts/*.sh
-}
-
-create_backup_system() {
-    echo -e "${QUASAR_ORANGE}💾 Tworzenie systemu backup...${NC}"
-    
-    cat > "$PANEL_DIR/scripts/backup_manager.sh" << 'EOF'
-#!/bin/bash
-BACKUP_DIR="$HOME/cosmic-panel/backups"
-SERVERS_DIR="$HOME/cosmic-panel/servers"
-
-backup_server() {
-    local server=$1
-    local timestamp=$(date +"%Y%m%d_%H%M%S")
-    local backup_file="${BACKUP_DIR}/${server}_${timestamp}.tar.gz"
-    
-    echo "💾 Creating backup for $server..."
-    tar -czf "$backup_file" -C "$SERVERS_DIR" "$server" 2>/dev/null
-    
-    if [ $? -eq 0 ]; then
-        echo "✅ Backup created: $(basename $backup_file)"
-        # Keep only last 5 backups
-        ls -t "${BACKUP_DIR}/${server}"_*.tar.gz 2>/dev/null | tail -n +6 | xargs -r rm
-    else
-        echo "❌ Backup failed for $server"
-    fi
-}
-
-# Backup all servers
-for server in fivem minecraft discord-bot valheim; do
-    if [ -d "$SERVERS_DIR/$server" ]; then
-        backup_server "$server" &
-    fi
-done
-
-wait
-echo "🚀 All backups completed!"
-EOF
-
-    chmod +x "$PANEL_DIR/scripts/backup_manager.sh"
-    
-    # Zaplanuj automatyczne backupy
-    (crontab -l 2>/dev/null; echo "0 2 * * * $PANEL_DIR/scripts/backup_manager.sh") | crontab -
 }
 
 start_services() {
     echo -e "${STAR_BLUE}🚀 Uruchamianie usług kosmicznych...${NC}"
     
-    # Uruchom serwer API
-    if ! command -v python3 &> /dev/null; then
-        echo -e "${COMET_YELLOW}📦 Installing Python...${NC}"
-        sudo apt-get update > /dev/null 2>&1
-        sudo apt-get install -y python3 > /dev/null 2>&1
+    # Sprawdź czy Node.js jest dostępny
+    if ! command -v node &> /dev/null; then
+        echo -e "${COMET_YELLOW}📦 Node.js nie jest dostępny, używam Python...${NC}"
+        start_python_server
+    else
+        # Uruchom serwer Node.js
+        cd "$WEB_DIR"
+        node server.js > "$LOG_DIR/server.log" 2>&1 &
+        echo $! > "$PANEL_DIR/server.pid"
+        echo -e "${PLANET_GREEN}✅ Serwer Node.js uruchomiony!${NC}"
     fi
-    
-    # Uruchom serwer API w tle
-    cd "$WEB_DIR"
-    python3 api.py > "$LOG_DIR/api.log" 2>&1 &
-    echo $! > "$PANEL_DIR/api.pid"
-    
-    # Uruchom serwery
-    for server in fivem minecraft; do
-        bash "$PANEL_DIR/scripts/${server}_start.sh" > "$LOG_DIR/${server}.log" 2>&1 &
-    done
-    
-    echo -e "${PLANET_GREEN}✅ Wszystkie usługi uruchomione!${NC}"
 }
 
-stop_services() {
-    echo -e "${NOVA_RED}🛑 Zatrzymywanie usług...${NC}"
-    
-    # Zatrzymaj serwer API
-    if [ -f "$PANEL_DIR/api.pid" ]; then
-        kill $(cat "$PANEL_DIR/api.pid") 2>/dev/null
-        rm "$PANEL_DIR/api.pid"
-    fi
-    
-    # Zatrzymaj wszystkie serwery
-    for server in fivem minecraft discord-bot valheim; do
-        if [ -f "$PANEL_DIR/scripts/${server}_stop.sh" ]; then
-            bash "$PANEL_DIR/scripts/${server}_stop.sh" > /dev/null 2>&1 &
-        fi
-    done
-    
-    echo -e "${PLANET_GREEN}✅ Wszystkie usługi zatrzymane!${NC}"
+start_python_server() {
+    # Prosty serwer HTTP w Pythonie
+    cd "$WEB_DIR"
+    python3 -m http.server $WEB_PORT > "$LOG_DIR/server.log" 2>&1 &
+    echo $! > "$PANEL_DIR/server.pid"
+    echo -e "${PLANET_GREEN}✅ Serwer Python uruchomiony na porcie $WEB_PORT!${NC}"
 }
 
 show_status() {
     print_cosmic_header
     echo -e "${GALAXY_CYAN}=== 🚀 STATUS KOSMICZNEGO PANELU ===${NC}"
     
-    # Sprawdź serwer API
-    if [ -f "$PANEL_DIR/api.pid" ] && kill -0 $(cat "$PANEL_DIR/api.pid") 2>/dev/null; then
-        echo -e "🌐 API Server:    ${PLANET_GREEN}RUNNING${NC} (port 8080)"
+    # Sprawdź serwer
+    if [ -f "$PANEL_DIR/server.pid" ] && kill -0 $(cat "$PANEL_DIR/server.pid") 2>/dev/null; then
+        echo -e "🌐 Web Server:    ${PLANET_GREEN}RUNNING${NC} (port $WEB_PORT)"
     else
-        echo -e "🌐 API Server:    ${NOVA_RED}STOPPED${NC}"
+        echo -e "🌐 Web Server:    ${NOVA_RED}STOPPED${NC}"
     fi
     
-    # Sprawdź serwery
-    echo -e "\n${STAR_BLUE}🎮 STATUS SERWERÓW:${NC}"
-    servers=("fivem" "minecraft" "discord-bot" "valheim")
-    for server in "${servers[@]}"; do
-        if screen -list | grep -q "$server"; then
-            echo -e "  ${PLANET_GREEN}✅${NC} $server: ${PLANET_GREEN}RUNNING${NC}"
-        else
-            echo -e "  ${NOVA_RED}❌${NC} $server: ${NOVA_RED}STOPPED${NC}"
-        fi
-    done
-    
-    # Informacje systemowe
-    echo -e "\n${COMET_YELLOW}📊 INFORMACJE SYSTEMOWE:${NC}"
+    echo -e "\n${COMET_YELLOW}📊 INFORMACJE:${NC}"
     echo -e "  📁 Panel Directory: $PANEL_DIR"
-    echo -e "  💾 Backups: $(ls -1 $BACKUP_DIR/*.tar.gz 2>/dev/null | wc -l)"
-    echo -e "  📝 Logs: $(ls -1 $LOG_DIR/*.log 2>/dev/null | wc -l)"
-    echo -e "  👥 Users: $(($(jq '.clients | length' $DB_DIR/users.json 2>/dev/null || echo 0) + 1))"
+    echo -e "  🌐 Web Directory: $WEB_DIR"
+    echo -e "  💾 Database: $DB_DIR"
+    echo -e "  📝 Logs: $LOG_DIR"
 }
 
 cosmic_menu() {
@@ -1861,32 +907,33 @@ cosmic_menu() {
         show_status | tail -n +3
         
         echo -e "\n${NEBULA_PURPLE}┌─🚀 KOSMICZNE MENU────────────────────────┐${NC}"
-        echo -e "  ${PLANET_GREEN}1. 🚀 Start All Services${NC}"
-        echo -e "  ${NOVA_RED}2. 🛑 Stop All Services${NC}"
+        echo -e "  ${PLANET_GREEN}1. 🚀 Start Services${NC}"
+        echo -e "  ${NOVA_RED}2. 🛑 Stop Services${NC}"
         echo -e "  ${COMET_YELLOW}3. 🌐 Open Web Panel${NC}"
         echo -e "  ${GALAXY_CYAN}4. 🛠️  Reinstall Panel${NC}"
-        echo -e "  ${STAR_BLUE}5. 💾 Create Backup${NC}"
-        echo -e "  ${QUASAR_ORANGE}6. 📊 System Info${NC}"
-        echo -e "  ${NEBULA_PURPLE}7. 👥 User Management${NC}"
-        echo -e "  ${COMET_YELLOW}0. ❌ Exit to Earth${NC}"
+        echo -e "  ${STAR_BLUE}5. 📊 System Info${NC}"
+        echo -e "  ${NOVA_RED}0. ❌ Exit${NC}"
         echo -e "${NEBULA_PURPLE}└──────────────────────────────────────────┘${NC}"
         echo ""
-        read -p "$(echo -e "${GALAXY_CYAN}🚀 Wybierz opcję [0-7]: ${NC}")" choice
+        read -p "$(echo -e "${GALAXY_CYAN}🚀 Wybierz opcję [0-5]: ${NC}")" choice
         
         case $choice in
             1)
                 start_services
-                loading_animation $! "Uruchamianie usług"
+                sleep 2
                 ;;
             2)
-                stop_services
-                loading_animation $! "Zatrzymywanie usług"
+                if [ -f "$PANEL_DIR/server.pid" ]; then
+                    kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
+                    rm "$PANEL_DIR/server.pid"
+                    echo -e "${PLANET_GREEN}✅ Usługi zatrzymane!${NC}"
+                fi
                 ;;
             3)
                 echo -e "${COMET_YELLOW}🌐 Otwieranie panelu web...${NC}"
-                echo -e "${STAR_BLUE}📋 Adres: http://localhost:8080${NC}"
-                echo -e "${GALAXY_CYAN}👤 Admin: http://localhost:8080/admin.html${NC}"
-                echo -e "${PLANET_GREEN}🎮 Client: http://localhost:8080/client.html${NC}"
+                echo -e "${STAR_BLUE}📋 Adres: http://localhost:$WEB_PORT${NC}"
+                echo -e "${GALAXY_CYAN}👤 Admin: http://localhost:$WEB_PORT/admin.html${NC}"
+                echo -e "${PLANET_GREEN}🎮 Client: http://localhost:$WEB_PORT/client.html${NC}"
                 ;;
             4)
                 echo -e "${COMET_YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
@@ -1894,26 +941,13 @@ cosmic_menu() {
                 create_structure
                 ;;
             5)
-                echo -e "${STAR_BLUE}💾 Tworzenie backupu wszystkich serwerów...${NC}"
-                bash "$PANEL_DIR/scripts/backup_manager.sh" &
-                loading_animation $! "Tworzenie backupów"
-                ;;
-            6)
                 show_status
                 ;;
-            7)
-                echo -e "${NEBULA_PURPLE}👥 Zarządzanie użytkownikami...${NC}"
-                echo -e "Admin: $ADMIN_USERNAME"
-                echo -e "Clients: $(jq '.clients | length' $DB_DIR/users.json 2>/dev/null || echo 0)"
-                ;;
             0)
-                stop_services
-                echo -e "${GALAXY_CYAN}"
-                echo -e "╔══════════════════════════════════════════════╗"
-                echo -e "║              👋 DO ZOBACZENIA!              ║"
-                echo -e "║         Bezpiecznego lotu kosmicznego!      ║"
-                echo -e "╚══════════════════════════════════════════════╝"
-                echo -e "${NC}"
+                if [ -f "$PANEL_DIR/server.pid" ]; then
+                    kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
+                fi
+                echo -e "${GALAXY_CYAN}👋 Do zobaczenia!${NC}"
                 exit 0
                 ;;
             *)
@@ -1927,6 +961,12 @@ cosmic_menu() {
 
 # Główna funkcja
 main() {
+    # Sprawdź czy CodeSandbox
+    if [ -n "$CODESANDBOX_HOST" ] || [ -n "$SANDBOX_URL" ]; then
+        echo -e "${COMET_YELLOW}🌐 Wykryto środowisko CodeSandbox${NC}"
+        WEB_PORT=$PORT
+    fi
+
     case "${1:-}" in
         "install")
             create_structure
@@ -1935,7 +975,10 @@ main() {
             start_services
             ;;
         "stop")
-            stop_services
+            if [ -f "$PANEL_DIR/server.pid" ]; then
+                kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
+                rm "$PANEL_DIR/server.pid"
+            fi
             ;;
         "status")
             show_status
