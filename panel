@@ -6,13 +6,13 @@
 
 # Konfiguracja dla CodeSandbox
 PANEL_DIR="/tmp/cosmic-panel"
-WEB_DIR="$PANEL_DIR/web"
-SERVER_DIR="$PANEL_DIR/servers"
-LOG_DIR="$PANEL_DIR/logs"
-DB_DIR="$PANEL_DIR/database"
-CONFIG_DIR="$PANEL_DIR/config"
-BACKUP_DIR="$PANEL_DIR/backups"
-TEMP_DIR="$PANEL_DIR/temp"
+WEB_DIR="${PANEL_DIR}/web"
+SERVER_DIR="${PANEL_DIR}/servers"
+LOG_DIR="${PANEL_DIR}/logs"
+DB_DIR="${PANEL_DIR}/database"
+CONFIG_DIR="${PANEL_DIR}/config"
+BACKUP_DIR="${PANEL_DIR}/backups"
+TEMP_DIR="${PANEL_DIR}/temp"
 
 # Porty dla CodeSandbox
 WEB_PORT=${PORT:-8080}
@@ -28,32 +28,32 @@ NC='\033[0m'
 
 print_cosmic_header() {
     clear
-    echo -e "${NEBULA_PURPLE}"
+    printf "${NEBULA_PURPLE}"
     echo "╔══════════════════════════════════════════════════════════════╗"
     echo "║                                                              ║"
     echo "║  🚀 COSMIC GAME PANEL - CODESANDBOX EDITION                 ║"
     echo "║         Intergalactic Control Center                        ║"
     echo "║                                                              ║"
     echo "╚══════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
+    printf "${NC}"
 }
 
 create_structure() {
     print_cosmic_header
-    echo -e "${COMET_YELLOW}🚀 Inicjalizacja struktury kosmicznego panelu...${NC}"
+    printf "${COMET_YELLOW}🚀 Inicjalizacja struktury kosmicznego panelu...${NC}\n"
     
-    mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR $BACKUP_DIR $TEMP_DIR
-    mkdir -p $SERVER_DIR/{fivem,minecraft,discord-bot,valheim}
-    mkdir -p $WEB_DIR/{css,js,images,api}
+    mkdir -p "${WEB_DIR}" "${SERVER_DIR}" "${LOG_DIR}" "${DB_DIR}" "${CONFIG_DIR}" "${BACKUP_DIR}" "${TEMP_DIR}"
+    mkdir -p "${SERVER_DIR}/fivem" "${SERVER_DIR}/minecraft" "${SERVER_DIR}/discord-bot" "${SERVER_DIR}/valheim"
+    mkdir -p "${WEB_DIR}/css" "${WEB_DIR}/js" "${WEB_DIR}/images" "${WEB_DIR}/api"
     
     create_database
     create_web_interface
     
-    echo -e "${PLANET_GREEN}✅ Struktura panelu została stworzona!${NC}"
+    printf "${PLANET_GREEN}✅ Struktura panelu została stworzona!${NC}\n"
 }
 
 create_database() {
-    cat > "$DB_DIR/users.json" << 'EOF'
+    cat > "${DB_DIR}/users.json" << 'EOF'
 {
     "admin": {
         "password": "cosmic123",
@@ -65,7 +65,7 @@ create_database() {
 }
 EOF
 
-    cat > "$DB_DIR/servers.json" << 'EOF'
+    cat > "${DB_DIR}/servers.json" << 'EOF'
 {
     "fivem": {
         "name": "FiveM Roleplay",
@@ -102,7 +102,7 @@ EOF
 }
 EOF
 
-    cat > "$DB_DIR/packages.json" << 'EOF'
+    cat > "${DB_DIR}/packages.json" << 'EOF'
 {
     "packages": [
         {
@@ -144,10 +144,10 @@ EOF
 }
 
 create_web_interface() {
-    echo -e "${STAR_BLUE}🌐 Tworzenie interfejsu kosmicznego...${NC}"
+    printf "${STAR_BLUE}🌐 Tworzenie interfejsu kosmicznego...${NC}\n"
     
-    # Strona główna (uproszczona)
-    cat > "$WEB_DIR/index.html" << 'EOF'
+    # Strona główna
+    cat > "${WEB_DIR}/index.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -297,7 +297,7 @@ create_web_interface() {
 EOF
 
     # Strona z pakietami
-    cat > "$WEB_DIR/packages.html" << 'EOF'
+    cat > "${WEB_DIR}/packages.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -406,7 +406,7 @@ EOF
 }
 
 create_client_panel() {
-    cat > "$WEB_DIR/client.html" << 'EOF'
+    cat > "${WEB_DIR}/client.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -527,7 +527,7 @@ EOF
 }
 
 create_admin_panel() {
-    cat > "$WEB_DIR/admin.html" << 'EOF'
+    cat > "${WEB_DIR}/admin.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -680,7 +680,7 @@ EOF
 }
 
 create_api_server() {
-    cat > "$WEB_DIR/server.js" << 'EOF'
+    cat > "${WEB_DIR}/server.js" << 'EOF'
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -860,62 +860,57 @@ EOF
 }
 
 start_services() {
-    echo -e "${STAR_BLUE}🚀 Uruchamianie usług kosmicznych...${NC}"
+    printf "${STAR_BLUE}🚀 Uruchamianie usług kosmicznych...${NC}\n"
     
     # Sprawdź czy Node.js jest dostępny
-    if ! command -v node &> /dev/null; then
-        echo -e "${COMET_YELLOW}📦 Node.js nie jest dostępny, używam Python...${NC}"
-        start_python_server
-    else
+    if command -v node >/dev/null 2>&1; then
         # Uruchom serwer Node.js
-        cd "$WEB_DIR"
-        node server.js > "$LOG_DIR/server.log" 2>&1 &
-        echo $! > "$PANEL_DIR/server.pid"
-        echo -e "${PLANET_GREEN}✅ Serwer Node.js uruchomiony!${NC}"
+        cd "${WEB_DIR}"
+        node server.js > "${LOG_DIR}/server.log" 2>&1 &
+        echo $! > "${PANEL_DIR}/server.pid"
+        printf "${PLANET_GREEN}✅ Serwer Node.js uruchomiony!${NC}\n"
+    else
+        # Uruchom serwer HTTP w Pythonie
+        cd "${WEB_DIR}"
+        python3 -m http.server "${WEB_PORT}" > "${LOG_DIR}/server.log" 2>&1 &
+        echo $! > "${PANEL_DIR}/server.pid"
+        printf "${PLANET_GREEN}✅ Serwer Python uruchomiony na porcie ${WEB_PORT}!${NC}\n"
     fi
-}
-
-start_python_server() {
-    # Prosty serwer HTTP w Pythonie
-    cd "$WEB_DIR"
-    python3 -m http.server $WEB_PORT > "$LOG_DIR/server.log" 2>&1 &
-    echo $! > "$PANEL_DIR/server.pid"
-    echo -e "${PLANET_GREEN}✅ Serwer Python uruchomiony na porcie $WEB_PORT!${NC}"
 }
 
 show_status() {
     print_cosmic_header
-    echo -e "${GALAXY_CYAN}=== 🚀 STATUS KOSMICZNEGO PANELU ===${NC}"
+    printf "${GALAXY_CYAN}=== 🚀 STATUS KOSMICZNEGO PANELU ===${NC}\n"
     
     # Sprawdź serwer
-    if [ -f "$PANEL_DIR/server.pid" ] && kill -0 $(cat "$PANEL_DIR/server.pid") 2>/dev/null; then
-        echo -e "🌐 Web Server:    ${PLANET_GREEN}RUNNING${NC} (port $WEB_PORT)"
+    if [ -f "${PANEL_DIR}/server.pid" ] && kill -0 "$(cat "${PANEL_DIR}/server.pid")" 2>/dev/null; then
+        printf "🌐 Web Server:    ${PLANET_GREEN}RUNNING${NC} (port ${WEB_PORT})\n"
     else
-        echo -e "🌐 Web Server:    ${NOVA_RED}STOPPED${NC}"
+        printf "🌐 Web Server:    ${NOVA_RED}STOPPED${NC}\n"
     fi
     
-    echo -e "\n${COMET_YELLOW}📊 INFORMACJE:${NC}"
-    echo -e "  📁 Panel Directory: $PANEL_DIR"
-    echo -e "  🌐 Web Directory: $WEB_DIR"
-    echo -e "  💾 Database: $DB_DIR"
-    echo -e "  📝 Logs: $LOG_DIR"
+    printf "\n${COMET_YELLOW}📊 INFORMACJE:${NC}\n"
+    printf "  📁 Panel Directory: ${PANEL_DIR}\n"
+    printf "  🌐 Web Directory: ${WEB_DIR}\n"
+    printf "  💾 Database: ${DB_DIR}\n"
+    printf "  📝 Logs: ${LOG_DIR}\n"
 }
 
 cosmic_menu() {
     while true; do
         print_cosmic_header
-        show_status | tail -n +3
+        show_status
         
-        echo -e "\n${NEBULA_PURPLE}┌─🚀 KOSMICZNE MENU────────────────────────┐${NC}"
-        echo -e "  ${PLANET_GREEN}1. 🚀 Start Services${NC}"
-        echo -e "  ${NOVA_RED}2. 🛑 Stop Services${NC}"
-        echo -e "  ${COMET_YELLOW}3. 🌐 Open Web Panel${NC}"
-        echo -e "  ${GALAXY_CYAN}4. 🛠️  Reinstall Panel${NC}"
-        echo -e "  ${STAR_BLUE}5. 📊 System Info${NC}"
-        echo -e "  ${NOVA_RED}0. ❌ Exit${NC}"
-        echo -e "${NEBULA_PURPLE}└──────────────────────────────────────────┘${NC}"
-        echo ""
-        read -p "$(echo -e "${GALAXY_CYAN}🚀 Wybierz opcję [0-5]: ${NC}")" choice
+        printf "\n${NEBULA_PURPLE}┌─🚀 KOSMICZNE MENU────────────────────────┐${NC}\n"
+        printf "  ${PLANET_GREEN}1. 🚀 Start Services${NC}\n"
+        printf "  ${NOVA_RED}2. 🛑 Stop Services${NC}\n"
+        printf "  ${COMET_YELLOW}3. 🌐 Open Web Panel${NC}\n"
+        printf "  ${GALAXY_CYAN}4. 🛠️  Reinstall Panel${NC}\n"
+        printf "  ${STAR_BLUE}5. 📊 System Info${NC}\n"
+        printf "  ${NOVA_RED}0. ❌ Exit${NC}\n"
+        printf "${NEBULA_PURPLE}└──────────────────────────────────────────┘${NC}\n"
+        printf "\n"
+        read -p "$(printf "${GALAXY_CYAN}🚀 Wybierz opcję [0-5]: ${NC}")" choice
         
         case $choice in
             1)
@@ -923,48 +918,48 @@ cosmic_menu() {
                 sleep 2
                 ;;
             2)
-                if [ -f "$PANEL_DIR/server.pid" ]; then
-                    kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
-                    rm "$PANEL_DIR/server.pid"
-                    echo -e "${PLANET_GREEN}✅ Usługi zatrzymane!${NC}"
+                if [ -f "${PANEL_DIR}/server.pid" ]; then
+                    kill "$(cat "${PANEL_DIR}/server.pid")" 2>/dev/null
+                    rm "${PANEL_DIR}/server.pid"
+                    printf "${PLANET_GREEN}✅ Usługi zatrzymane!${NC}\n"
                 fi
                 ;;
             3)
-                echo -e "${COMET_YELLOW}🌐 Otwieranie panelu web...${NC}"
-                echo -e "${STAR_BLUE}📋 Adres: http://localhost:$WEB_PORT${NC}"
-                echo -e "${GALAXY_CYAN}👤 Admin: http://localhost:$WEB_PORT/admin.html${NC}"
-                echo -e "${PLANET_GREEN}🎮 Client: http://localhost:$WEB_PORT/client.html${NC}"
+                printf "${COMET_YELLOW}🌐 Otwieranie panelu web...${NC}\n"
+                printf "${STAR_BLUE}📋 Adres: http://localhost:${WEB_PORT}${NC}\n"
+                printf "${GALAXY_CYAN}👤 Admin: http://localhost:${WEB_PORT}/admin.html${NC}\n"
+                printf "${PLANET_GREEN}🎮 Client: http://localhost:${WEB_PORT}/client.html${NC}\n"
                 ;;
             4)
-                echo -e "${COMET_YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
-                rm -rf $PANEL_DIR
+                printf "${COMET_YELLOW}🛠️  Przeinstalowywanie panelu...${NC}\n"
+                rm -rf "${PANEL_DIR}"
                 create_structure
                 ;;
             5)
                 show_status
                 ;;
             0)
-                if [ -f "$PANEL_DIR/server.pid" ]; then
-                    kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
+                if [ -f "${PANEL_DIR}/server.pid" ]; then
+                    kill "$(cat "${PANEL_DIR}/server.pid")" 2>/dev/null
                 fi
-                echo -e "${GALAXY_CYAN}👋 Do zobaczenia!${NC}"
+                printf "${GALAXY_CYAN}👋 Do zobaczenia!${NC}\n"
                 exit 0
                 ;;
             *)
-                echo -e "${NOVA_RED}❌ Nieprawidłowy wybór${NC}"
+                printf "${NOVA_RED}❌ Nieprawidłowy wybór${NC}\n"
                 ;;
         esac
-        echo ""
-        read -p "$(echo -e "${COMET_YELLOW}🌌 Naciśnij Enter aby kontynuować...${NC}")"
+        printf "\n"
+        read -p "$(printf "${COMET_YELLOW}🌌 Naciśnij Enter aby kontynuować...${NC}")"
     done
 }
 
 # Główna funkcja
 main() {
     # Sprawdź czy CodeSandbox
-    if [ -n "$CODESANDBOX_HOST" ] || [ -n "$SANDBOX_URL" ]; then
-        echo -e "${COMET_YELLOW}🌐 Wykryto środowisko CodeSandbox${NC}"
-        WEB_PORT=$PORT
+    if [ -n "${CODESANDBOX_HOST}" ] || [ -n "${SANDBOX_URL}" ]; then
+        printf "${COMET_YELLOW}🌐 Wykryto środowisko CodeSandbox${NC}\n"
+        WEB_PORT="${PORT}"
     fi
 
     case "${1:-}" in
@@ -975,9 +970,9 @@ main() {
             start_services
             ;;
         "stop")
-            if [ -f "$PANEL_DIR/server.pid" ]; then
-                kill $(cat "$PANEL_DIR/server.pid") 2>/dev/null
-                rm "$PANEL_DIR/server.pid"
+            if [ -f "${PANEL_DIR}/server.pid" ]; then
+                kill "$(cat "${PANEL_DIR}/server.pid")" 2>/dev/null
+                rm "${PANEL_DIR}/server.pid"
             fi
             ;;
         "status")
@@ -987,7 +982,7 @@ main() {
             cosmic_menu
             ;;
         *)
-            if [ ! -d "$PANEL_DIR" ]; then
+            if [ ! -d "${PANEL_DIR}" ]; then
                 create_structure
             fi
             start_services
