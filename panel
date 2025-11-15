@@ -31,51 +31,6 @@ CYAN='\033[0;36m'
 PURPLE='\033[0;35m'
 NC='\033[0m'
 
-# Funkcje pomocnicze
-get_ip_address() {
-    # Spróbuj różne metody uzyskania IP
-    local ip=""
-    
-    # Sprawdź publiczne IP
-    ip=$(curl -s https://api.ipify.org 2>/dev/null || curl -s https://checkip.amazonaws.com 2>/dev/null)
-    
-    if [ -z "$ip" ]; then
-        # Sprawdź lokalne IP
-        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    fi
-    
-    if [ -z "$ip" ]; then
-        # Ostateczne fallback
-        ip="localhost"
-    fi
-    
-    echo "$ip"
-}
-
-get_codespaces_url() {
-    if [ ! -z "$CODESPACES" ]; then
-        echo "https://${CODESPACE_NAME}-${WEB_PORT}.preview.app.github.dev"
-    else
-        echo ""
-    fi
-}
-
-show_access_urls() {
-    local ip=$(get_ip_address)
-    local codespaces_url=$(get_codespaces_url)
-    
-    echo -e "${GREEN}🌐 DOSTĘP DO PANELU:${NC}"
-    echo -e "${CYAN}📱 Local:    http://localhost:${WEB_PORT}${NC}"
-    echo -e "${CYAN}🌐 Network:  http://${ip}:${WEB_PORT}${NC}"
-    
-    if [ ! -z "$codespaces_url" ]; then
-        echo -e "${CYAN}🚀 Cloud:    ${codespaces_url}${NC}"
-    fi
-    
-    echo -e "${YELLOW}🔐 Login: admin / admin123${NC}"
-    echo ""
-}
-
 # Funkcja tworząca strukturę
 create_structure() {
     echo -e "${PURPLE}🛠️  Tworzenie struktury panelu...${NC}"
@@ -261,20 +216,6 @@ create_web_interface() {
             color: #22543d;
             border: 1px solid #9ae6b4;
         }
-        
-        .server-info {
-            margin-top: 20px;
-            padding: 15px;
-            background: #f7fafc;
-            border-radius: 8px;
-            font-size: 0.9em;
-            color: #4a5568;
-        }
-        
-        .server-info h3 {
-            margin-bottom: 10px;
-            color: #2d3748;
-        }
     </style>
 </head>
 <body>
@@ -303,13 +244,6 @@ create_web_interface() {
         <div class="links">
             <a href="#" onclick="showRegister()">Zarejestruj nowe konto</a>
         </div>
-        
-        <div class="server-info">
-            <h3>📋 Informacje o serwerze</h3>
-            <div id="server-address">Ładowanie...</div>
-            <div><strong>Login:</strong> admin</div>
-            <div><strong>Hasło:</strong> admin123</div>
-        </div>
     </div>
 
     <script>
@@ -318,23 +252,6 @@ create_web_interface() {
             alert.textContent = message;
             alert.className = `alert alert-${type}`;
             alert.style.display = 'block';
-        }
-        
-        // Pobierz informacje o serwerze
-        function loadServerInfo() {
-            const serverInfo = document.getElementById('server-address');
-            const protocol = window.location.protocol;
-            const hostname = window.location.hostname;
-            const port = window.location.port;
-            
-            let addresses = `<strong>Adres:</strong> ${protocol}//${hostname}${port ? ':' + port : ''}<br>`;
-            
-            // Jeśli to localhost, pokaż też adres sieciowy
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                addresses += `<strong>Sieć:</strong> Sprawdź adres IP serwera<br>`;
-            }
-            
-            serverInfo.innerHTML = addresses;
         }
         
         function showRegister() {
@@ -402,9 +319,6 @@ create_web_interface() {
         if (localStorage.getItem('auth_token')) {
             window.location.href = '/dashboard.html';
         }
-        
-        // Załaduj informacje o serwerze
-        loadServerInfo();
     </script>
 </body>
 </html>
@@ -620,19 +534,6 @@ EOF
         .timestamp {
             color: #718096;
         }
-        
-        .connection-info {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-size: 0.9em;
-        }
-        
-        .connection-info h3 {
-            margin-bottom: 10px;
-            color: #4a5568;
-        }
     </style>
 </head>
 <body>
@@ -645,11 +546,6 @@ EOF
     </nav>
 
     <div class="container">
-        <div class="connection-info">
-            <h3>🌐 Informacje o połączeniu</h3>
-            <div id="connection-details">Ładowanie...</div>
-        </div>
-
         <div class="header">
             <h1>Witaj w panelu sterowania!</h1>
             <p>Zarządzaj serwerami gry w czasie rzeczywistym</p>
@@ -697,10 +593,6 @@ EOF
                         <span>Uptime:</span>
                         <span id="fivem-uptime">--</span>
                     </div>
-                    <div class="info-item">
-                        <span>Connect:</span>
-                        <span>connect <span id="fivem-connect-ip">server.ip</span>:30120</span>
-                    </div>
                 </div>
                 <div class="controls">
                     <button class="btn btn-stop" onclick="controlServer('fivem', 'stop')">Stop</button>
@@ -731,10 +623,6 @@ EOF
                     <div class="info-item">
                         <span>Version:</span>
                         <span>1.20.1</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Connect:</span>
-                        <span><span id="minecraft-connect-ip">server.ip</span>:25565</span>
                     </div>
                 </div>
                 <div class="controls">
@@ -796,31 +684,6 @@ EOF
         const token = localStorage.getItem('auth_token');
         if (!token) {
             window.location.href = '/login.html';
-        }
-
-        // Załaduj informacje o połączeniu
-        function loadConnectionInfo() {
-            const connectionDetails = document.getElementById('connection-details');
-            const protocol = window.location.protocol;
-            const hostname = window.location.hostname;
-            const port = window.location.port;
-            
-            let details = `<strong>Bieżący adres:</strong> ${protocol}//${hostname}${port ? ':' + port : ''}<br>`;
-            
-            // Zaktualizuj adresy IP w kartach serwerów
-            document.getElementById('fivem-connect-ip').textContent = hostname;
-            document.getElementById('minecraft-connect-ip').textContent = hostname;
-            
-            // Jeśli to localhost, spróbuj uzyskać adres sieciowy
-            if (hostname === 'localhost' || hostname === '127.0.0.1') {
-                details += `<strong>Dostęp zdalny:</strong> Użyj adresu IP tego serwera<br>`;
-                details += `<strong>Porty:</strong> FiveM: 30120, Minecraft: 25565, Panel: ${port || 80}`;
-            } else {
-                details += `<strong>FiveM Connect:</strong> connect ${hostname}:30120<br>`;
-                details += `<strong>Minecraft Connect:</strong> ${hostname}:25565`;
-            }
-            
-            connectionDetails.innerHTML = details;
         }
 
         // Update stats periodically
@@ -963,7 +826,6 @@ EOF
         }
         
         // Initialize
-        loadConnectionInfo();
         setInterval(updateStats, 2000);
         updateStats();
         
@@ -1018,8 +880,6 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                 return
             server = self.path.split('/')[-1]
             self.serve_console(server)
-        elif self.path == '/api/serverinfo':
-            self.serve_server_info()
         else:
             self.serve_file(self.path[1:])
     
@@ -1088,34 +948,6 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                 self.send_error(404)
         except Exception as e:
             self.send_error(500, str(e))
-    
-    def serve_server_info(self):
-        # Get server IP information
-        try:
-            # Get public IP
-            public_ip = subprocess.run(['curl', '-s', 'https://api.ipify.org'], 
-                                    capture_output=True, text=True).stdout.strip()
-            if not public_ip:
-                public_ip = subprocess.run(['curl', '-s', 'https://checkip.amazonaws.com'], 
-                                         capture_output=True, text=True).stdout.strip()
-            
-            # Get local IP
-            local_ip = subprocess.run(['hostname', '-I'], 
-                                    capture_output=True, text=True).stdout.strip().split()[0]
-            
-            info = {
-                "public_ip": public_ip,
-                "local_ip": local_ip,
-                "hostname": subprocess.run(['hostname'], capture_output=True, text=True).stdout.strip(),
-                "ports": {
-                    "panel": 8080,
-                    "fivem": 30120,
-                    "minecraft": 25565
-                }
-            }
-            self.send_json_response(info)
-        except:
-            self.send_json_response({"error": "Could not get server info"})
     
     def handle_login(self):
         content_length = int(self.headers['Content-Length'])
@@ -1294,41 +1126,9 @@ class GamePanelHandler(BaseHTTPRequestHandler):
 def start_web_server():
     port = 8080
     server = HTTPServer(('0.0.0.0', port), GamePanelHandler)
-    
-    # Pobierz informacje o adresach
-    ip = get_ip_address()
-    codespaces_url = get_codespaces_url()
-    
-    print(f"🌐 Game Panel dostępny pod:")
-    print(f"📱 Local:    http://localhost:{port}")
-    print(f"🌐 Network:  http://{ip}:{port}")
-    if codespaces_url:
-        print(f"🚀 Cloud:    {codespaces_url}")
-    print(f"🔐 Login:    admin / admin123")
-    print(f"🕹️  FiveM:    connect {ip}:30120")
-    print(f"⛏️  Minecraft: {ip}:25565")
-    
+    print(f"🌐 Game Panel dostępny pod: http://0.0.0.0:{port}")
+    print(f"🔐 Domyślne konto: admin / admin123")
     server.serve_forever()
-
-def get_ip_address():
-    try:
-        ip = subprocess.run(['curl', '-s', 'https://api.ipify.org'], 
-                          capture_output=True, text=True).stdout.strip()
-        if not ip:
-            ip = subprocess.run(['curl', '-s', 'https://checkip.amazonaws.com'], 
-                              capture_output=True, text=True).stdout.strip()
-        if not ip:
-            result = subprocess.run(['hostname', '-I'], capture_output=True, text=True)
-            ip = result.stdout.strip().split()[0] if result.stdout else 'localhost'
-        return ip
-    except:
-        return 'localhost'
-
-def get_codespaces_url():
-    codespace_name = os.environ.get('CODESPACE_NAME')
-    if codespace_name:
-        return f"https://{codespace_name}-8080.preview.app.github.dev"
-    return None
 
 if __name__ == '__main__':
     start_web_server()
@@ -1336,9 +1136,6 @@ EOF
 
     chmod +x "$WEB_DIR/api.py"
 }
-
-# Pozostałe funkcje (create_control_scripts, create_config_files, create_servers) 
-# pozostają bez zmian - takie same jak w poprzedniej wersji
 
 create_control_scripts() {
     echo -e "${YELLOW}⚙️ Tworzenie skryptów kontrolnych...${NC}"
@@ -1396,7 +1193,7 @@ bash $HOME/game-panel/scripts/fivem_start.sh
 echo "FiveM restarted"
 EOF
 
-    # Minecraft scripts (bez zmian)
+    # Minecraft scripts
     cat > "$SCRIPTS_DIR/minecraft_start.sh" << 'EOF'
 #!/bin/bash
 echo "Starting Minecraft server..."
@@ -1414,7 +1211,7 @@ screen -S minecraft -X quit
 echo "Minecraft stopped"
 EOF
 
-    # Discord bot scripts (bez zmian)
+    # Discord bot scripts
     cat > "$SCRIPTS_DIR/discord_start.sh" << 'EOF'
 #!/bin/bash
 echo "Starting Discord bot..."
@@ -1442,10 +1239,11 @@ create_config_files() {
 # FiveM Server Configuration
 # Game Panel - Pterodactyl Like
 
+# Only change the IP if you're using a server with multiple network interfaces, otherwise change the port only.
 endpoint_add_tcp "0.0.0.0:30120"
 endpoint_add_udp "0.0.0.0:30120"
 
-# Resources
+# These resources will start by default.
 start mapmanager
 start chat
 start spawnmanager
@@ -1454,7 +1252,7 @@ start basic-gamemode
 start hardcap
 start rconlog
 
-# Ensure resources
+# Add your server artifacts here
 ensure mapmanager
 ensure chat
 ensure spawnmanager
@@ -1526,12 +1324,25 @@ EOF
     # Minecraft server.properties
     cat > "$SERVER_DIR/minecraft/server.properties" << 'EOF'
 #Minecraft server properties
+#Game Panel Managed Server
 server-port=25565
 max-players=20
 online-mode=false
 level-type=default
 server-name=Game Panel Minecraft
 motd=Managed by Game Panel
+EOF
+
+    # Discord bot config
+    cat > "$SERVER_DIR/discord-bot/config.json" << 'EOF'
+{
+    "token": "YOUR_BOT_TOKEN_HERE",
+    "prefix": "!",
+    "gamePanel": {
+        "url": "http://localhost:8080",
+        "servers": ["fivem", "minecraft"]
+    }
+}
 EOF
 
     chmod +x "$SCRIPTS_DIR/install_fivem.sh"
@@ -1548,6 +1359,7 @@ create_servers() {
             "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
         echo "eula=true" > "$SERVER_DIR/minecraft/eula.txt"
         
+        # Create startup script for Minecraft
         cat > "$SERVER_DIR/minecraft/start.sh" << 'EOF'
 #!/bin/bash
 java -Xmx1024M -Xms1024M -jar server.jar nogui
@@ -1558,15 +1370,23 @@ EOF
     # Discord bot setup
     cat > "$SERVER_DIR/discord-bot/bot.js" << 'EOF'
 const { Client, GatewayIntentBits } = require('discord.js');
+
 console.log('🤖 Discord Bot starting...');
+
 const client = new Client({
     intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
 });
+
 client.once('ready', () => {
-    console.log(`✅ Bot ready`);
+    console.log(`✅ Bot ready: ${client.user.tag}`);
     console.log('🕹️  Game Panel Bot is online!');
 });
+
+// Demo mode - don't actually login without token
 console.log('🔶 Running in demo mode');
+console.log('💡 Set DISCORD_BOT_TOKEN to connect to Discord');
+
+// Keep the process alive
 setInterval(() => {
     console.log('🤖 Bot heartbeat...');
 }, 60000);
@@ -1576,6 +1396,7 @@ EOF
 {
     "name": "discord-bot",
     "version": "1.0.0",
+    "description": "Game Panel Discord Bot",
     "main": "bot.js",
     "scripts": {
         "start": "node bot.js"
@@ -1606,8 +1427,10 @@ start_web_panel() {
     WEB_PID=$!
     echo $WEB_PID > "$PANEL_DIR/web.pid"
     
-    sleep 2
-    show_access_urls
+    echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
+    echo -e "${CYAN}📱 Adres: http://localhost:$WEB_PORT${NC}"
+    echo -e "${CYAN}🔐 Login: admin / admin123${NC}"
+    echo -e "${CYAN}🌐 Public URL: Check Codespaces Ports tab${NC}"
 }
 
 stop_web_panel() {
@@ -1649,9 +1472,6 @@ show_status() {
     else
         echo -e "🚗 FiveM: ${YELLOW}NOT INSTALLED${NC}"
     fi
-    
-    echo ""
-    show_access_urls
 }
 
 main_menu() {
@@ -1693,7 +1513,8 @@ main_menu() {
                 ;;
             4)
                 echo -e "${CYAN}🌐 Otwieranie przeglądarki...${NC}"
-                show_access_urls
+                echo -e "${YELLOW}📋 Adres: http://localhost:$WEB_PORT${NC}"
+                echo -e "${YELLOW}🔐 Login: admin / admin123${NC}"
                 ;;
             5)
                 echo -e "${YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
