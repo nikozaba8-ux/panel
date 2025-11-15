@@ -3,7 +3,6 @@
 # ==============================================
 # GAME PANEL - PTERODACTYL LIKE
 # Web Interface on port 8080
-# FiveM + Minecraft + Discord Bot
 # ==============================================
 
 # Konfiguracja
@@ -13,14 +12,10 @@ SERVER_DIR="$PANEL_DIR/servers"
 LOG_DIR="$PANEL_DIR/logs"
 DB_DIR="$PANEL_DIR/database"
 CONFIG_DIR="$PANEL_DIR/config"
-SCRIPTS_DIR="$PANEL_DIR/scripts"
+USERS_FILE="$DB_DIR/users.json"
 
 # Port panelu web
 WEB_PORT=8080
-
-# FiveM Artifact
-FIVEM_ARTIFACT="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/6786-91c9a5e2d49f67d5f8a7e8987a5a5f6b9b6b9c2f/fx.tar.xz"
-FIVEM_KEYMASTER="cfxk_1KQZ7kCqTxpTa0lahpVjF_Y8aNc"
 
 # Kolory
 RED='\033[0;31m'
@@ -35,63 +30,17 @@ NC='\033[0m'
 create_structure() {
     echo -e "${PURPLE}🛠️  Tworzenie struktury panelu...${NC}"
     
-    mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR $SCRIPTS_DIR
+    mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR
     mkdir -p $SERVER_DIR/fivem $SERVER_DIR/minecraft $SERVER_DIR/discord-bot
-    mkdir -p $SERVER_DIR/fivem/data $SERVER_DIR/fivem/cache $SERVER_DIR/fivem/logs
     
-    create_database
+    # Inicjalizacja bazy użytkowników
+    if [ ! -f "$USERS_FILE" ]; then
+        echo '{"users": [], "sessions": {}}' > "$USERS_FILE"
+    fi
+    
     create_web_interface
     create_config_files
     create_servers
-    create_control_scripts
-}
-
-create_database() {
-    echo -e "${YELLOW}🗃️  Tworzenie bazy danych użytkowników...${NC}"
-    
-    # Plik SQLite dla użytkowników
-    cat > "$DB_DIR/init_db.py" << 'EOF'
-import sqlite3
-import hashlib
-import os
-
-DB_PATH = os.path.join(os.path.dirname(__file__), 'users.db')
-
-def init_database():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password_hash TEXT NOT NULL,
-            email TEXT UNIQUE,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            is_admin BOOLEAN DEFAULT FALSE,
-            permissions TEXT DEFAULT 'user'
-        )
-    ''')
-    
-    # Dodaj domyślnego admina
-    admin_hash = hashlib.sha256('admin123'.encode()).hexdigest()
-    try:
-        cursor.execute(
-            'INSERT INTO users (username, password_hash, email, is_admin) VALUES (?, ?, ?, ?)',
-            ('admin', admin_hash, 'admin@gamepanel.com', True)
-        )
-    except sqlite3.IntegrityError:
-        pass
-    
-    conn.commit()
-    conn.close()
-    print("Database initialized")
-
-if __name__ == '__main__':
-    init_database()
-EOF
-
-    python3 "$DB_DIR/init_db.py"
 }
 
 create_web_interface() {
@@ -115,7 +64,8 @@ create_web_interface() {
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            height: 100vh;
+            color: #333;
+            min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -138,8 +88,11 @@ create_web_interface() {
         
         .logo h1 {
             color: #4a5568;
-            font-size: 2em;
-            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            font-size: 1.8em;
         }
         
         .form-group {
@@ -177,44 +130,71 @@ create_web_interface() {
             font-size: 16px;
             font-weight: 600;
             cursor: pointer;
-            transition: background 0.3s ease;
+            transition: all 0.3s ease;
         }
         
         .btn:hover {
-            background: #5a67d8;
+            background: #5a6fd8;
+            transform: translateY(-2px);
         }
         
-        .links {
-            margin-top: 20px;
-            text-align: center;
-        }
-        
-        .links a {
-            color: #667eea;
-            text-decoration: none;
-        }
-        
-        .links a:hover {
-            text-decoration: underline;
-        }
-        
-        .alert {
-            padding: 10px;
-            border-radius: 5px;
+        .tabs {
+            display: flex;
             margin-bottom: 20px;
+            border-bottom: 2px solid #e2e8f0;
+        }
+        
+        .tab {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .tab.active {
+            border-bottom-color: #667eea;
+            color: #667eea;
+            font-weight: 600;
+        }
+        
+        .tab-content {
             display: none;
         }
         
-        .alert-error {
+        .tab-content.active {
+            display: block;
+        }
+        
+        .message {
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+            text-align: center;
+            display: none;
+        }
+        
+        .error {
             background: #fed7d7;
             color: #742a2a;
             border: 1px solid #feb2b2;
         }
         
-        .alert-success {
+        .success {
             background: #c6f6d5;
             color: #22543d;
             border: 1px solid #9ae6b4;
+        }
+        
+        .footer {
+            text-align: center;
+            margin-top: 20px;
+            color: #718096;
+        }
+        
+        .footer a {
+            color: #667eea;
+            text-decoration: none;
         }
     </style>
 </head>
@@ -222,101 +202,156 @@ create_web_interface() {
     <div class="login-container">
         <div class="logo">
             <h1>🕹️ Game Panel</h1>
-            <p>Zaloguj się do panelu sterowania</p>
+            <p>Zarządzanie serwerami gry</p>
         </div>
         
-        <div id="alert" class="alert"></div>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('login')">Login</div>
+            <div class="tab" onclick="switchTab('register')">Register</div>
+        </div>
         
-        <form id="loginForm">
-            <div class="form-group">
-                <label for="username">Nazwa użytkownika:</label>
-                <input type="text" id="username" name="username" required>
-            </div>
-            
-            <div class="form-group">
-                <label for="password">Hasło:</label>
-                <input type="password" id="password" name="password" required>
-            </div>
-            
-            <button type="submit" class="btn">Zaloguj się</button>
-        </form>
+        <div id="message" class="message"></div>
         
-        <div class="links">
-            <a href="#" onclick="showRegister()">Zarejestruj nowe konto</a>
+        <!-- Login Form -->
+        <div id="login-tab" class="tab-content active">
+            <form id="login-form">
+                <div class="form-group">
+                    <label for="login-username">Username</label>
+                    <input type="text" id="login-username" required>
+                </div>
+                <div class="form-group">
+                    <label for="login-password">Password</label>
+                    <input type="password" id="login-password" required>
+                </div>
+                <button type="submit" class="btn">Login</button>
+            </form>
+        </div>
+        
+        <!-- Register Form -->
+        <div id="register-tab" class="tab-content">
+            <form id="register-form">
+                <div class="form-group">
+                    <label for="register-username">Username</label>
+                    <input type="text" id="register-username" required minlength="3">
+                </div>
+                <div class="form-group">
+                    <label for="register-email">Email</label>
+                    <input type="email" id="register-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="register-password">Password</label>
+                    <input type="password" id="register-password" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="register-confirm-password">Confirm Password</label>
+                    <input type="password" id="register-confirm-password" required>
+                </div>
+                <button type="submit" class="btn">Register</button>
+            </form>
+        </div>
+        
+        <div class="footer">
+            <p>Game Panel v1.0</p>
         </div>
     </div>
 
     <script>
-        function showAlert(message, type) {
-            const alert = document.getElementById('alert');
-            alert.textContent = message;
-            alert.className = `alert alert-${type}`;
-            alert.style.display = 'block';
+        function switchTab(tabName) {
+            // Update tabs
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab-content').forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Activate selected tab
+            event.target.classList.add('active');
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Clear messages
+            hideMessage();
         }
         
-        function showRegister() {
-            const username = prompt('Podaj nazwę użytkownika:');
-            const password = prompt('Podaj hasło:');
-            const email = prompt('Podaj email:');
+        function showMessage(text, type) {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = 'message ' + type;
+            messageEl.style.display = 'block';
+        }
+        
+        function hideMessage() {
+            document.getElementById('message').style.display = 'none';
+        }
+        
+        // Login form handler
+        document.getElementById('login-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
             
-            if (username && password && email) {
-                fetch('/api/register', {
+            const username = document.getElementById('login-username').value;
+            const password = document.getElementById('login-password').value;
+            
+            try {
+                const response = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({
-                        username: username,
-                        password: password,
-                        email: email
-                    })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        showAlert('Konto utworzone! Możesz się teraz zalogować.', 'success');
-                    } else {
-                        showAlert(data.error || 'Błąd rejestracji', 'error');
-                    }
-                })
-                .catch(error => {
-                    showAlert('Błąd połączenia', 'error');
+                    body: JSON.stringify({ username, password })
                 });
-            }
-        }
-        
-        document.getElementById('loginForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            
-            fetch('/api/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    username: username,
-                    password: password
-                })
-            })
-            .then(response => response.json())
-            .then(data => {
+                
+                const data = await response.json();
+                
                 if (data.success) {
-                    localStorage.setItem('auth_token', data.token);
+                    localStorage.setItem('session_token', data.session_token);
                     window.location.href = '/dashboard.html';
                 } else {
-                    showAlert(data.error || 'Błędne dane logowania', 'error');
+                    showMessage(data.message, 'error');
                 }
-            })
-            .catch(error => {
-                showAlert('Błąd połączenia', 'error');
-            });
+            } catch (error) {
+                showMessage('Network error: ' + error, 'error');
+            }
         });
         
-        // Sprawdź czy już jest zalogowany
-        if (localStorage.getItem('auth_token')) {
+        // Register form handler
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const username = document.getElementById('register-username').value;
+            const email = document.getElementById('register-email').value;
+            const password = document.getElementById('register-password').value;
+            const confirmPassword = document.getElementById('register-confirm-password').value;
+            
+            if (password !== confirmPassword) {
+                showMessage('Passwords do not match', 'error');
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ username, email, password })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('Registration successful! Please login.', 'success');
+                    switchTab('login');
+                    document.getElementById('register-form').reset();
+                } else {
+                    showMessage(data.message, 'error');
+                }
+            } catch (error) {
+                showMessage('Network error: ' + error, 'error');
+            }
+        });
+        
+        // Check if already logged in
+        if (localStorage.getItem('session_token')) {
             window.location.href = '/dashboard.html';
         }
     </script>
@@ -324,7 +359,7 @@ create_web_interface() {
 </html>
 EOF
 
-    # Główny panel
+    # Strona główna/dashboard
     cat > "$WEB_DIR/dashboard.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
@@ -346,28 +381,6 @@ EOF
             min-height: 100vh;
         }
         
-        .navbar {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 15px 20px;
-            box-shadow: 0 2px 20px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .nav-brand {
-            font-size: 1.5em;
-            font-weight: bold;
-            color: #4a5568;
-        }
-        
-        .nav-user {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
         .container {
             max-width: 1200px;
             margin: 0 auto;
@@ -381,6 +394,24 @@ EOF
             border-radius: 15px;
             margin-bottom: 20px;
             box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .user-info {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .logout-btn {
+            padding: 8px 16px;
+            background: #f56565;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
         }
         
         .servers-grid {
@@ -457,6 +488,8 @@ EOF
             cursor: pointer;
             transition: all 0.3s ease;
             text-align: center;
+            text-decoration: none;
+            display: inline-block;
         }
         
         .btn-start {
@@ -476,11 +509,6 @@ EOF
         
         .btn-console {
             background: #4299e1;
-            color: white;
-        }
-        
-        .btn-logout {
-            background: #718096;
             color: white;
         }
         
@@ -534,21 +562,31 @@ EOF
         .timestamp {
             color: #718096;
         }
+        
+        @media (max-width: 768px) {
+            .servers-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .header {
+                flex-direction: column;
+                gap: 15px;
+            }
+        }
     </style>
 </head>
 <body>
-    <nav class="navbar">
-        <div class="nav-brand">🕹️ Game Control Panel</div>
-        <div class="nav-user">
-            <span id="username">Użytkownik</span>
-            <button class="btn btn-logout" onclick="logout()">Wyloguj</button>
-        </div>
-    </nav>
-
     <div class="container">
         <div class="header">
-            <h1>Witaj w panelu sterowania!</h1>
-            <p>Zarządzaj serwerami gry w czasie rzeczywistym</p>
+            <h1>🕹️ Game Control Panel</h1>
+            <div class="user-info">
+                <span>Welcome, <strong id="username">User</strong></span>
+                <button class="logout-btn" onclick="logout()">Logout</button>
+            </div>
         </div>
 
         <div class="stats">
@@ -680,24 +718,51 @@ EOF
     </div>
 
     <script>
-        // Sprawdź autoryzację
-        const token = localStorage.getItem('auth_token');
-        if (!token) {
+        // Check authentication
+        const sessionToken = localStorage.getItem('session_token');
+        if (!sessionToken) {
+            window.location.href = '/login.html';
+        }
+
+        // Load user info
+        async function loadUserInfo() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': 'Bearer ' + sessionToken
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Not authenticated');
+                }
+                
+                const data = await response.json();
+                document.getElementById('username').textContent = data.username;
+            } catch (error) {
+                logout();
+            }
+        }
+
+        function logout() {
+            localStorage.removeItem('session_token');
             window.location.href = '/login.html';
         }
 
         // Update stats periodically
-        function updateStats() {
-            fetch('/api/stats', {
-                headers: {
-                    'Authorization': 'Bearer ' + token
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats', {
+                    headers: {
+                        'Authorization': 'Bearer ' + sessionToken
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Not authenticated');
                 }
-            })
-            .then(response => {
-                if (!response.ok) throw new Error('Auth failed');
-                return response.json();
-            })
-            .then(data => {
+                
+                const data = await response.json();
                 document.getElementById('cpu-usage').textContent = data.cpu + '%';
                 document.getElementById('memory-usage').textContent = data.memory + '%';
                 document.getElementById('active-servers').textContent = data.active_servers;
@@ -706,11 +771,12 @@ EOF
                 updateServerStatus('fivem', data.servers.fivem);
                 updateServerStatus('minecraft', data.servers.minecraft);
                 updateServerStatus('discord', data.servers.discord);
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error('Error fetching stats:', error);
-                logout();
-            });
+                if (error.message === 'Not authenticated') {
+                    logout();
+                }
+            }
         }
         
         function updateServerStatus(server, data) {
@@ -739,71 +805,81 @@ EOF
             }
         }
         
-        function controlServer(server, action) {
-            fetch('/api/control', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': 'Bearer ' + token
-                },
-                body: JSON.stringify({
-                    server: server,
-                    action: action
-                })
-            })
-            .then(response => {
-                if (!response.ok) throw new Error('Auth failed');
-                return response.json();
-            })
-            .then(data => {
+        async function controlServer(server, action) {
+            try {
+                const response = await fetch('/api/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + sessionToken
+                    },
+                    body: JSON.stringify({
+                        server: server,
+                        action: action
+                    })
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Not authenticated');
+                }
+                
+                const data = await response.json();
                 addLog(`Server ${server}: ${action} command sent`);
                 updateStats();
-            })
-            .catch(error => {
+            } catch (error) {
                 addLog(`Error: ${error}`);
-                logout();
-            });
+                if (error.message === 'Not authenticated') {
+                    logout();
+                }
+            }
         }
         
-        function showConsole(server) {
-            fetch(`/api/console/${server}`, {
-                headers: {
-                    'Authorization': 'Bearer ' + token
+        async function showConsole(server) {
+            try {
+                const response = await fetch(`/api/console/${server}`, {
+                    headers: {
+                        'Authorization': 'Bearer ' + sessionToken
+                    }
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Not authenticated');
                 }
-            })
-            .then(response => {
-                if (!response.ok) throw new Error('Auth failed');
-                return response.json();
-            })
-            .then(data => {
+                
+                const data = await response.json();
                 const consoleOutput = document.getElementById('console-output');
                 consoleOutput.innerHTML = '';
                 data.logs.forEach(log => {
                     addLog(log, false);
                 });
-            })
-            .catch(error => {
-                logout();
-            });
+            } catch (error) {
+                if (error.message === 'Not authenticated') {
+                    logout();
+                }
+            }
         }
         
-        function sendCommand() {
+        async function sendCommand() {
             const input = document.getElementById('console-input');
             const command = input.value.trim();
             if (command) {
                 addLog(`> ${command}`);
                 input.value = '';
                 
-                fetch('/api/command', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + token
-                    },
-                    body: JSON.stringify({
-                        command: command
-                    })
-                });
+                try {
+                    await fetch('/api/command', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Authorization': 'Bearer ' + sessionToken
+                        },
+                        body: JSON.stringify({
+                            command: command
+                        })
+                    });
+                } catch (error) {
+                    console.error('Error sending command:', error);
+                }
             }
         }
         
@@ -820,15 +896,12 @@ EOF
             }
         }
         
-        function logout() {
-            localStorage.removeItem('auth_token');
-            window.location.href = '/login.html';
-        }
-        
         // Initialize
+        loadUserInfo();
         setInterval(updateStats, 2000);
         updateStats();
         
+        // Handle Enter key in console input
         document.getElementById('console-input').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') {
                 sendCommand();
@@ -843,7 +916,7 @@ EOF
 }
 
 create_api_scripts() {
-    # Główny skrypt API z autoryzacją
+    # Główny skrypt API w Pythonie z autentykacją
     cat > "$WEB_DIR/api.py" << 'EOF'
 #!/usr/bin/env python3
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -851,21 +924,23 @@ import json
 import os
 import subprocess
 import time
-import sqlite3
+import threading
+from datetime import datetime
 import hashlib
-import jwt
-import datetime
-from urllib.parse import urlparse, parse_qs
+import secrets
+import sqlite3
+import urllib.parse
 
 PANEL_DIR = os.path.expanduser("~/game-panel")
 LOG_DIR = os.path.join(PANEL_DIR, "logs")
 SERVER_DIR = os.path.join(PANEL_DIR, "servers")
-DB_PATH = os.path.join(PANEL_DIR, "database", "users.db")
-JWT_SECRET = "your-secret-key-change-in-production"
+DB_FILE = os.path.join(PANEL_DIR, "database", "panel.db")
 
 class GamePanelHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
+            self.serve_file('login.html')
+        elif self.path == '/login.html':
             self.serve_file('login.html')
         elif self.path == '/dashboard.html':
             if not self.authenticate():
@@ -880,13 +955,17 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                 return
             server = self.path.split('/')[-1]
             self.serve_console(server)
+        elif self.path == '/api/auth/me':
+            if not self.authenticate():
+                return
+            self.serve_user_info()
         else:
             self.serve_file(self.path[1:])
     
     def do_POST(self):
-        if self.path == '/api/login':
+        if self.path == '/api/auth/login':
             self.handle_login()
-        elif self.path == '/api/register':
+        elif self.path == '/api/auth/register':
             self.handle_register()
         elif self.path == '/api/control':
             if not self.authenticate():
@@ -906,19 +985,34 @@ class GamePanelHandler(BaseHTTPRequestHandler):
             return False
         
         token = auth_header.split(' ')[1]
-        try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-            self.user_id = payload['user_id']
-            return True
-        except:
+        user_id = self.validate_session(token)
+        
+        if not user_id:
             self.send_auth_error()
             return False
+        
+        self.user_id = user_id
+        return True
+    
+    def validate_session(self, token):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT user_id FROM sessions 
+            WHERE token = ? AND expires_at > datetime('now')
+        ''', (token,))
+        
+        result = cursor.fetchone()
+        conn.close()
+        
+        return result[0] if result else None
     
     def send_auth_error(self):
         self.send_response(401)
         self.send_header('Content-type', 'application/json')
         self.end_headers()
-        self.wfile.write(json.dumps({"error": "Unauthorized"}).encode('utf-8'))
+        self.wfile.write(json.dumps({"success": False, "message": "Authentication required"}).encode('utf-8'))
     
     def serve_file(self, filename):
         try:
@@ -949,62 +1043,6 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_error(500, str(e))
     
-    def handle_login(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
-        
-        username = data.get('username')
-        password = data.get('password')
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
-        user = cursor.fetchone()
-        conn.close()
-        
-        if user and user[1] == hashlib.sha256(password.encode()).hexdigest():
-            token = jwt.encode({
-                'user_id': user[0],
-                'username': username,
-                'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-            }, JWT_SECRET, algorithm='HS256')
-            
-            self.send_json_response({"success": True, "token": token})
-        else:
-            self.send_json_response({"success": False, "error": "Invalid credentials"})
-    
-    def handle_register(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
-        
-        username = data.get('username')
-        password = data.get('password')
-        email = data.get('email')
-        
-        if not username or not password:
-            self.send_json_response({"success": False, "error": "Username and password required"})
-            return
-        
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        try:
-            cursor.execute(
-                'INSERT INTO users (username, password_hash, email) VALUES (?, ?, ?)',
-                (username, password_hash, email)
-            )
-            conn.commit()
-            self.send_json_response({"success": True})
-        except sqlite3.IntegrityError:
-            self.send_json_response({"success": False, "error": "Username already exists"})
-        finally:
-            conn.close()
-    
     def serve_stats(self):
         stats = {
             "cpu": self.get_cpu_usage(),
@@ -1025,8 +1063,97 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         logs = []
         if os.path.exists(log_file):
             with open(log_file, 'r') as f:
-                logs = f.readlines()[-50:]
+                logs = f.readlines()[-50:]  # Last 50 lines
         self.send_json_response({"logs": logs})
+    
+    def serve_user_info(self):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT username FROM users WHERE id = ?', (self.user_id,))
+        user = cursor.fetchone()
+        conn.close()
+        
+        if user:
+            self.send_json_response({"username": user[0]})
+        else:
+            self.send_auth_error()
+    
+    def handle_login(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        data = json.loads(post_data.decode('utf-8'))
+        
+        username = data.get('username')
+        password = data.get('password')
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
+        user = cursor.fetchone()
+        
+        if user and self.verify_password(password, user[1]):
+            # Create session
+            token = secrets.token_hex(32)
+            expires_at = datetime.now().timestamp() + (24 * 60 * 60)  # 24 hours
+            
+            cursor.execute('''
+                INSERT INTO sessions (user_id, token, expires_at)
+                VALUES (?, ?, datetime(?, 'unixepoch'))
+            ''', (user[0], token, expires_at))
+            
+            conn.commit()
+            conn.close()
+            
+            self.send_json_response({
+                "success": True,
+                "message": "Login successful",
+                "session_token": token
+            })
+        else:
+            conn.close()
+            self.send_json_response({
+                "success": False,
+                "message": "Invalid username or password"
+            })
+    
+    def handle_register(self):
+        content_length = int(self.headers['Content-Length'])
+        post_data = self.rfile.read(content_length)
+        data = json.loads(post_data.decode('utf-8'))
+        
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        # Check if user exists
+        cursor.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
+        if cursor.fetchone():
+            conn.close()
+            self.send_json_response({
+                "success": False,
+                "message": "Username or email already exists"
+            })
+            return
+        
+        # Create user
+        password_hash = self.hash_password(password)
+        cursor.execute('''
+            INSERT INTO users (username, email, password_hash, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+        ''', (username, email, password_hash))
+        
+        conn.commit()
+        conn.close()
+        
+        self.send_json_response({
+            "success": True,
+            "message": "Registration successful"
+        })
     
     def handle_control(self):
         content_length = int(self.headers['Content-Length'])
@@ -1036,6 +1163,7 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         server = data.get('server')
         action = data.get('action')
         
+        # Execute control action
         result = self.control_server(server, action)
         self.send_json_response({"status": "success", "result": result})
     
@@ -1045,8 +1173,9 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         data = json.loads(post_data.decode('utf-8'))
         
         command = data.get('command')
+        # Log the command
         with open(os.path.join(LOG_DIR, "commands.log"), "a") as f:
-            f.write(f"[{datetime.datetime.now()}] Command: {command}\n")
+            f.write(f"[{datetime.now()}] Command: {command}\n")
         
         self.send_json_response({"status": "received"})
     
@@ -1058,7 +1187,14 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
     def log_message(self, format, *args):
+        # Disable default logging
         pass
+    
+    def hash_password(self, password):
+        return hashlib.sha256(password.encode()).hexdigest()
+    
+    def verify_password(self, password, password_hash):
+        return self.hash_password(password) == password_hash
     
     # System monitoring functions
     def get_cpu_usage(self):
@@ -1072,7 +1208,7 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                     return round(100 - idle, 1)
         except:
             pass
-        return round(20.5, 1)
+        return round(20.5, 1)  # Fallback
     
     def get_memory_usage(self):
         try:
@@ -1085,7 +1221,7 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                 return round((used / total) * 100, 1)
         except:
             pass
-        return round(45.2, 1)
+        return round(45.2, 1)  # Fallback
     
     def get_active_servers_count(self):
         count = 0
@@ -1123,251 +1259,182 @@ class GamePanelHandler(BaseHTTPRequestHandler):
             return f"{action} command sent to {server}"
         return f"No script found for {server} {action}"
 
+def init_database():
+    os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
+    
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    
+    # Create users table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE NOT NULL,
+            password_hash TEXT NOT NULL,
+            created_at DATETIME NOT NULL
+        )
+    ''')
+    
+    # Create sessions table
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token TEXT UNIQUE NOT NULL,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Create default admin user if not exists
+    cursor.execute('SELECT id FROM users WHERE username = ?', ('admin',))
+    if not cursor.fetchone():
+        import hashlib
+        password_hash = hashlib.sha256('admin123'.encode()).hexdigest()
+        cursor.execute('''
+            INSERT INTO users (username, email, password_hash, created_at)
+            VALUES (?, ?, ?, datetime('now'))
+        ''', ('admin', 'admin@localhost', password_hash))
+    
+    conn.commit()
+    conn.close()
+
 def start_web_server():
+    init_database()
+    
     port = 8080
     server = HTTPServer(('0.0.0.0', port), GamePanelHandler)
     print(f"🌐 Game Panel dostępny pod: http://0.0.0.0:{port}")
-    print(f"🔐 Domyślne konto: admin / admin123")
+    print(f"🔐 Login: admin / admin123")
+    print(f"📱 Dostęp z zewnątrz: http://your-codespace-url:{port}")
     server.serve_forever()
 
 if __name__ == '__main__':
     start_web_server()
 EOF
 
-    chmod +x "$WEB_DIR/api.py"
-}
-
-create_control_scripts() {
-    echo -e "${YELLOW}⚙️ Tworzenie skryptów kontrolnych...${NC}"
+    # Skrypty kontroli serwerów
+    mkdir -p "$PANEL_DIR/scripts"
     
-    # FiveM scripts
-    cat > "$SCRIPTS_DIR/fivem_start.sh" << 'EOF'
+    # FiveM scripts - prawdziwy serwer
+    cat > "$PANEL_DIR/scripts/fivem_start.sh" << 'EOF'
 #!/bin/bash
-PANEL_DIR="$HOME/game-panel"
-LOG_DIR="$PANEL_DIR/logs"
+echo "Starting FiveM server..."
+cd ~/game-panel/servers/fivem
 
-echo "$(date): Starting FiveM server..." >> "$LOG_DIR/fivem.log"
-
-cd "$PANEL_DIR/servers/fivem"
-
-# Upewnij się że serwer FiveM jest pobrany
+# Sprawdź czy serwer jest już pobrany
 if [ ! -f "run.sh" ]; then
-    echo "$(date): FiveM not installed, running installer..." >> "$LOG_DIR/fivem.log"
-    bash "$PANEL_DIR/scripts/install_fivem.sh"
+    echo "❌ FiveM server not installed. Run './game-panel.sh install-fivem' first."
+    exit 1
 fi
 
-# Uruchom serwer FiveM w screen session
-screen -dmS fivem bash -c "bash run.sh 2>&1 | tee -a $LOG_DIR/fivem_console.log"
-
-echo "$(date): FiveM server started in screen session" >> "$LOG_DIR/fivem.log"
-echo "FiveM started"
+# Uruchom serwer w screen
+screen -dmS fivem bash -c "./run.sh 2>&1 | tee ~/game-panel/logs/fivem.log"
+echo "✅ FiveM server started in screen session 'fivem'"
+echo "📋 Use 'screen -r fivem' to view console"
 EOF
 
-    cat > "$SCRIPTS_DIR/fivem_stop.sh" << 'EOF'
+    cat > "$PANEL_DIR/scripts/fivem_stop.sh" << 'EOF'
 #!/bin/bash
-PANEL_DIR="$HOME/game-panel"
-LOG_DIR="$PANEL_DIR/logs"
-
-echo "$(date): Stopping FiveM server..." >> "$LOG_DIR/fivem.log"
-
-# Wyślij polecenie zatrzymania do konsoli FiveM
-screen -S fivem -X stuff "quit^M"
-sleep 10
-
-# Jeśli nadal działa, wymuś zamknięcie
-if screen -list | grep -q "fivem"; then
-    screen -S fivem -X quit
-    echo "$(date): FiveM server force stopped" >> "$LOG_DIR/fivem.log"
-else
-    echo "$(date): FiveM server stopped gracefully" >> "$LOG_DIR/fivem.log"
-fi
-
-echo "FiveM stopped"
-EOF
-
-    cat > "$SCRIPTS_DIR/fivem_restart.sh" << 'EOF'
-#!/bin/bash
-bash $HOME/game-panel/scripts/fivem_stop.sh
+echo "Stopping FiveM server..."
+screen -S fivem -X stuff "^C"
 sleep 5
-bash $HOME/game-panel/scripts/fivem_start.sh
-echo "FiveM restarted"
+screen -S fivem -X quit
+echo "✅ FiveM server stopped"
 EOF
 
     # Minecraft scripts
-    cat > "$SCRIPTS_DIR/minecraft_start.sh" << 'EOF'
+    cat > "$PANEL_DIR/scripts/minecraft_start.sh" << 'EOF'
 #!/bin/bash
 echo "Starting Minecraft server..."
-cd $HOME/game-panel/servers/minecraft
-screen -dmS minecraft bash -c "java -Xmx1G -Xms512M -jar server.jar nogui"
-echo "Minecraft started"
+cd ~/game-panel/servers/minecraft
+
+if [ ! -f "server.jar" ]; then
+    echo "⚠️ Downloading Minecraft server..."
+    wget -q -O server.jar \
+        "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
+    echo "eula=true" > eula.txt
+fi
+
+screen -dmS minecraft bash -c "java -Xmx1G -Xms512M -jar server.jar nogui 2>&1 | tee ~/game-panel/logs/minecraft.log"
+echo "✅ Minecraft server started"
 EOF
 
-    cat > "$SCRIPTS_DIR/minecraft_stop.sh" << 'EOF'
+    cat > "$PANEL_DIR/scripts/minecraft_stop.sh" << 'EOF'
 #!/bin/bash
 echo "Stopping Minecraft server..."
 screen -S minecraft -X stuff "stop\n"
-sleep 5
+sleep 10
 screen -S minecraft -X quit
-echo "Minecraft stopped"
+echo "✅ Minecraft server stopped"
 EOF
 
     # Discord bot scripts
-    cat > "$SCRIPTS_DIR/discord_start.sh" << 'EOF'
+    cat > "$PANEL_DIR/scripts/discord_start.sh" << 'EOF'
 #!/bin/bash
 echo "Starting Discord bot..."
-cd $HOME/game-panel/servers/discord-bot
-screen -dmS discord-bot bash -c "node bot.js"
-echo "Discord bot started"
+cd ~/game-panel/servers/discord-bot
+screen -dmS discord-bot bash -c "node bot.js 2>&1 | tee ~/game-panel/logs/discord.log"
+echo "✅ Discord bot started"
 EOF
 
-    cat > "$SCRIPTS_DIR/discord_stop.sh" << 'EOF'
+    cat > "$PANEL_DIR/scripts/discord_stop.sh" << 'EOF'
 #!/bin/bash
 echo "Stopping Discord bot..."
 screen -S discord-bot -X quit
 pkill -f "node.*bot.js"
-echo "Discord bot stopped"
+echo "✅ Discord bot stopped"
 EOF
 
-    chmod +x $SCRIPTS_DIR/*.sh
+    chmod +x $PANEL_DIR/scripts/*.sh
+}
+
+install_fivem_server() {
+    echo -e "${PURPLE}🚗 Installing FiveM Server...${NC}"
+    
+    cd "$SERVER_DIR/fivem"
+    
+    # Pobierz artefakty FiveM
+    echo "📦 Downloading FiveM artifacts..."
+    wget -q "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/22279-aa01d2b869bff4c28012065603eaf15541aa8fc4/fx.tar.xz"
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Failed to download FiveM server"
+        return 1
+    fi
+    
+    # Wypakuj
+    echo "📂 Extracting FiveM server..."
+    tar -xf fx.tar.xz
+    rm fx.tar.xz
+    
+    # Utwórz skrypt uruchamiania
+    cat > "run.sh" << 'EOF'
+#!/bin/bash
+echo "🚗 Starting FiveM Server..."
+./run.sh
+EOF
+
+    chmod +x run.sh
+    
+    # Keymaster configuration
+    cat > "keymaster.json" << 'EOF'
+{
+    "keymaster": "cfxk_1KQZ7kCqTxpTa0lahpVjF_Y8aNc"
+}
+EOF
+
+    echo "✅ FiveM server installed successfully!"
+    echo "🔑 Keymaster configured"
+    echo "🎮 Start the server from the web panel"
 }
 
 create_config_files() {
     echo -e "${YELLOW}📄 Tworzenie plików konfiguracyjnych...${NC}"
     
-    # FiveM server.cfg
-    cat > "$SERVER_DIR/fivem/server.cfg" << 'EOF'
-# FiveM Server Configuration
-# Game Panel - Pterodactyl Like
-
-# Only change the IP if you're using a server with multiple network interfaces, otherwise change the port only.
-endpoint_add_tcp "0.0.0.0:30120"
-endpoint_add_udp "0.0.0.0:30120"
-
-# These resources will start by default.
-start mapmanager
-start chat
-start spawnmanager
-start sessionmanager
-start basic-gamemode
-start hardcap
-start rconlog
-
-# Add your server artifacts here
-ensure mapmanager
-ensure chat
-ensure spawnmanager
-ensure sessionmanager
-ensure basic-gamemode
-ensure hardcap
-ensure rconlog
-
-# Server settings
-sv_hostname "Game Panel FiveM Server"
-sv_projectName "Game Panel"
-sv_projectDesc "FiveM Server managed by Game Panel"
-sv_licenseKey "cfxk_1KQZ7kCqTxpTa0lahpVjF_Y8aNc"
-
-# RCON password
-rcon_password "panel123"
-
-# Max players
-sv_maxclients 32
-
-# OneSync settings
-set onesync on
-
-# Language
-sets locale "en-US"
-
-# Tags
-sets tags "gamepanel,managed,fivem"
-
-# Logging
-sv_logsEnabled 1
-
-# Enable enhanced host support
-sv_enhancedHostSupport true
-EOF
-
-    # Skrypt instalacyjny FiveM
-    cat > "$SCRIPTS_DIR/install_fivem.sh" << EOF
-#!/bin/bash
-echo "🔵 Installing FiveM server..."
-cd "$SERVER_DIR/fivem"
-
-# Pobierz artifact FiveM
-echo "📥 Downloading FiveM artifact..."
-wget -q "$FIVEM_ARTIFACT" -O fx.tar.xz
-
-if [ ! -f "fx.tar.xz" ]; then
-    echo "❌ Failed to download FiveM artifact"
-    exit 1
-fi
-
-# Rozpakuj
-echo "📦 Extracting FiveM..."
-tar -xf fx.tar.xz
-rm fx.tar.xz
-
-# Ustaw prawa wykonania
-chmod +x run.sh
-
-# Pobierz artefakty
-echo "🔧 Setting up FiveM..."
-bash run.sh +quit
-
-echo "✅ FiveM installation completed"
-EOF
-
-    chmod +x "$SCRIPTS_DIR/install_fivem.sh"
-
-    # Minecraft server.properties
-    cat > "$SERVER_DIR/minecraft/server.properties" << 'EOF'
-#Minecraft server properties
-#Game Panel Managed Server
-server-port=25565
-max-players=20
-online-mode=false
-level-type=default
-server-name=Game Panel Minecraft
-motd=Managed by Game Panel
-EOF
-
-    # Discord bot config
-    cat > "$SERVER_DIR/discord-bot/config.json" << 'EOF'
-{
-    "token": "YOUR_BOT_TOKEN_HERE",
-    "prefix": "!",
-    "gamePanel": {
-        "url": "http://localhost:8080",
-        "servers": ["fivem", "minecraft"]
-    }
-}
-EOF
-
-    chmod +x "$SCRIPTS_DIR/install_fivem.sh"
-}
-
-create_servers() {
-    echo -e "${YELLOW}🎮 Przygotowywanie serwerów...${NC}"
-    
-    # Minecraft server setup
-    if [ ! -f "$SERVER_DIR/minecraft/server.jar" ]; then
-        mkdir -p "$SERVER_DIR/minecraft"
-        echo "⛏️  Downloading Minecraft server..."
-        wget -q -O "$SERVER_DIR/minecraft/server.jar" \
-            "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
-        echo "eula=true" > "$SERVER_DIR/minecraft/eula.txt"
-        
-        # Create startup script for Minecraft
-        cat > "$SERVER_DIR/minecraft/start.sh" << 'EOF'
-#!/bin/bash
-java -Xmx1024M -Xms1024M -jar server.jar nogui
-EOF
-        chmod +x "$SERVER_DIR/minecraft/start.sh"
-    fi
-    
-    # Discord bot setup
+    # Discord bot
     cat > "$SERVER_DIR/discord-bot/bot.js" << 'EOF'
 const { Client, GatewayIntentBits } = require('discord.js');
 
@@ -1396,11 +1463,6 @@ EOF
 {
     "name": "discord-bot",
     "version": "1.0.0",
-    "description": "Game Panel Discord Bot",
-    "main": "bot.js",
-    "scripts": {
-        "start": "node bot.js"
-    },
     "dependencies": {
         "discord.js": "^14.14.1"
     }
@@ -1418,8 +1480,11 @@ start_web_panel() {
         sudo apt-get install -y python3 python3-pip > /dev/null 2>&1
     fi
     
-    # Zainstaluj zależności Pythona
-    pip3 install pyjwt > /dev/null 2>&1
+    # Sprawdź czy screen jest dostępny
+    if ! command -v screen &> /dev/null; then
+        echo -e "${YELLOW}📦 Instalowanie screen...${NC}"
+        sudo apt-get install -y screen > /dev/null 2>&1
+    fi
     
     # Uruchom serwer web
     cd "$WEB_DIR"
@@ -1439,11 +1504,6 @@ stop_web_panel() {
         rm "$PANEL_DIR/web.pid"
         echo -e "${GREEN}✅ Panel web zatrzymany${NC}"
     fi
-}
-
-install_fivem() {
-    echo -e "${YELLOW}🚗 Instalowanie serwera FiveM...${NC}"
-    bash "$SCRIPTS_DIR/install_fivem.sh"
 }
 
 show_status() {
@@ -1468,9 +1528,9 @@ show_status() {
     
     # Check FiveM installation
     if [ -f "$SERVER_DIR/fivem/run.sh" ]; then
-        echo -e "🚗 FiveM: ${GREEN}INSTALLED${NC}"
+        echo -e "📦 FiveM: ${GREEN}INSTALLED${NC}"
     else
-        echo -e "🚗 FiveM: ${YELLOW}NOT INSTALLED${NC}"
+        echo -e "📦 FiveM: ${YELLOW}NOT INSTALLED${NC}"
     fi
 }
 
@@ -1481,7 +1541,7 @@ main_menu() {
         echo -e "╔══════════════════════════════════════╗"
         echo -e "║           🕹️ GAME PANEL            ║"
         echo -e "║           Pterodactyl-like          ║"
-        echo -e "║        With FiveM & Auth System     ║"
+        echo -e "║        Authenticated System         ║"
         echo -e "╚══════════════════════════════════════╝"
         echo -e "${NC}"
         
@@ -1490,8 +1550,8 @@ main_menu() {
         
         echo -e "${BLUE}1. 🚀 Start Web Panel${NC}"
         echo -e "${BLUE}2. 🛑 Stop Web Panel${NC}"
-        echo -e "${BLUE}3. 🚗 Install FiveM Server${NC}"
-        echo -e "${BLUE}4. 🌐 Open in Browser${NC}"
+        echo -e "${BLUE}3. 🌐 Open in Browser${NC}"
+        echo -e "${BLUE}4. 🚗 Install FiveM Server${NC}"
         echo -e "${BLUE}5. 🛠️  Reinstall Panel${NC}"
         echo -e "${BLUE}6. 📊 Show Logs${NC}"
         echo -e "${BLUE}0. ❌ Exit${NC}"
@@ -1509,12 +1569,12 @@ main_menu() {
                 stop_web_panel
                 ;;
             3)
-                install_fivem
-                ;;
-            4)
                 echo -e "${CYAN}🌐 Otwieranie przeglądarki...${NC}"
                 echo -e "${YELLOW}📋 Adres: http://localhost:$WEB_PORT${NC}"
-                echo -e "${YELLOW}🔐 Login: admin / admin123${NC}"
+                echo -e "${GREEN}🔐 Login: admin / admin123${NC}"
+                ;;
+            4)
+                install_fivem_server
                 ;;
             5)
                 echo -e "${YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
@@ -1538,15 +1598,21 @@ main_menu() {
 }
 
 # Main execution
-if [ "$1" = "install" ]; then
-    create_structure
-    start_web_panel
-elif [ "$1" = "start" ]; then
-    start_web_panel
-elif [ "$1" = "stop" ]; then
-    stop_web_panel
-elif [ "$1" = "fivem" ]; then
-    install_fivem
-else
-    main_menu
-fi
+case "$1" in
+    "install")
+        create_structure
+        start_web_panel
+        ;;
+    "start")
+        start_web_panel
+        ;;
+    "stop")
+        stop_web_panel
+        ;;
+    "install-fivem")
+        install_fivem_server
+        ;;
+    *)
+        main_menu
+        ;;
+esac
