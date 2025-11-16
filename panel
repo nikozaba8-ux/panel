@@ -52,7 +52,7 @@ echo_message "=== SKYPORT INSTALLER - BEZ WALLET ==="
 # Update system
 echo_message "[1/7] Updating system packages..."
 apt update && apt upgrade -y
-apt install -y curl software-properties-common git wget unzip build-essential
+apt install -y curl software-properties-common git wget unzip build-essential jq
 
 # Install Node.js
 echo_message "[2/7] Installing Node.js..."
@@ -68,17 +68,49 @@ echo_message "[3/7] Installing FiveM Assets..."
 mkdir -p /opt/fivem-assets
 cd /opt/fivem-assets
 
-# Get latest FiveM build
-echo_info "Downloading FiveM artifacts..."
-LATEST_BUILD=$(wget -q https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ -O - | grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' | sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//' | grep -E '^[0-9]' | head -1)
+# Get latest FiveM build - POPRAWIONA METODA
+echo_info "Searching for latest FiveM build..."
 
-if [ ! -z "$LATEST_BUILD" ]; then
-    wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$LATEST_BUILD/fx.tar.xz"
-    echo_info "Extracting FiveM..."
-    tar -xf fivem.tar.xz
-    echo_message "FiveM installed successfully"
+# Method 1: Use FiveM API to get latest build
+FIVEM_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -o 'href="[0-9]*-[a-zA-Z0-9]*/' | grep -o '[0-9]*-[a-zA-Z0-9]*' | head -1)
+
+# Method 2: Alternative approach if first fails
+if [ -z "$FIVEM_BUILD" ]; then
+    echo_warning "Method 1 failed, trying alternative method..."
+    FIVEM_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE '<a href="[0-9]+-[a-zA-Z0-9]+/' | sed 's/<a href="//g' | sed 's/\///g' | head -1)
+fi
+
+# Method 3: Direct download latest known stable
+if [ -z "$FIVEM_BUILD" ]; then
+    echo_warning "Could not detect latest build, downloading stable version..."
+    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE 'href="[0-9]+-[a-zA-Z0-9]+/' | grep -oE '[0-9]+-[a-zA-Z0-9]+' | sort -V | tail -1)/fx.tar.xz"
 else
-    echo_error "Failed to find FiveM build"
+    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${FIVEM_BUILD}/fx.tar.xz"
+fi
+
+echo_info "Downloading FiveM from: $FIVEM_URL"
+
+# Download FiveM
+if wget -O fivem.tar.xz "$FIVEM_URL"; then
+    echo_info "FiveM downloaded successfully"
+    echo_info "Extracting FiveM..."
+    
+    # Extract FiveM
+    if tar -xf fivem.tar.xz; then
+        echo_message "✓ FiveM extracted successfully"
+        
+        # Make run.sh executable
+        chmod +x run.sh
+        echo_message "✓ FiveM installation completed"
+    else
+        echo_error "Failed to extract FiveM archive"
+        exit 1
+    fi
+else
+    echo_error "Failed to download FiveM"
+    echo_warning "You can manually download FiveM from:"
+    echo_warning "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
+    echo_warning "And place fx.tar.xz in /opt/fivem-assets/"
     exit 1
 fi
 
@@ -283,6 +315,34 @@ cat > /usr/local/bin/fivem-status << 'EOF'
 systemctl status fivem
 EOF
 
+# Skrypt do ręcznego pobierania FiveM
+cat > /usr/local/bin/update-fivem << 'EOF'
+#!/bin/bash
+echo "Updating FiveM..."
+cd /opt/fivem-assets
+
+# Get latest build
+LATEST_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE 'href="[0-9]+-[a-zA-Z0-9]+/' | sed 's/href="//g' | sed 's/\///g' | head -1)
+
+if [ -z "$LATEST_BUILD" ]; then
+    echo "Failed to find latest FiveM build"
+    exit 1
+fi
+
+echo "Downloading build: $LATEST_BUILD"
+wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST_BUILD}/fx.tar.xz"
+
+if [ $? -eq 0 ]; then
+    tar -xf fivem.tar.xz
+    chmod +x run.sh
+    echo "FiveM updated successfully!"
+    echo "Restarting FiveM service..."
+    systemctl restart fivem
+else
+    echo "Failed to download FiveM"
+fi
+EOF
+
 # POPRAWIONY skrypt zarządzania zasobami
 cat > /usr/local/bin/manage-resources << 'EOF'
 #!/bin/bash
@@ -406,6 +466,7 @@ chmod +x /usr/local/bin/start-fivem
 chmod +x /usr/local/bin/stop-fivem
 chmod +x /usr/local/bin/fivem-status
 chmod +x /usr/local/bin/manage-resources
+chmod +x /usr/local/bin/update-fivem
 
 # Set permissions
 chown -R root:root /opt/oversee-fixed
@@ -426,6 +487,7 @@ echo ""
 echo "fivem-status      - Status serwera FiveM"
 echo "start-fivem       - Uruchom FiveM"
 echo "stop-fivem        - Zatrzymaj FiveM"
+echo "update-fivem      - Aktualizuj FiveM"
 echo ""
 echo "manage-resources  - Zarządzanie zasobami FiveM"
 echo ""
@@ -444,10 +506,10 @@ echo_message "=== WALLET WYJEBANY! ==="
 # Start services
 echo_info "Starting services..."
 systemctl start skyport
-systemctl start fivem
 
-# Wait a moment for services to start
-sleep 3
+# Don't start FiveM automatically (let user configure license first)
+echo_warning "FiveM service not started - configure license key first in server.cfg"
+echo_warning "Then run: start-fivem"
 
 # Show status
 echo ""
