@@ -50,21 +50,21 @@ echo -e "${CYAN}$ascii_art${NC}"
 echo_message "=== SKYPORT INSTALLER - BEZ WALLET ==="
 
 # Update system
-echo_message "[1/6] Updating system packages..."
+echo_message "[1/7] Updating system packages..."
 apt update && apt upgrade -y
 apt install -y curl software-properties-common git wget unzip build-essential
 
 # Install Node.js
-echo_message "[2/6] Installing Node.js..."
+echo_message "[2/7] Installing Node.js..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
 # Verify Node.js installation
-node -v
-npm -v
+echo_info "Node.js version: $(node -v)"
+echo_info "NPM version: $(npm -v)"
 
 # Install FiveM
-echo_message "[3/6] Installing FiveM Assets..."
+echo_message "[3/7] Installing FiveM Assets..."
 mkdir -p /opt/fivem-assets
 cd /opt/fivem-assets
 
@@ -81,6 +81,9 @@ else
     echo_error "Failed to find FiveM build"
     exit 1
 fi
+
+# Create resources directory
+mkdir -p /opt/fivem-assets/resources
 
 # Create basic server config for FiveM
 cat > /opt/fivem-assets/server.cfg << EOF
@@ -122,7 +125,7 @@ ensure rconlog
 EOF
 
 # Install Skyport
-echo_message "[4/6] Installing Skyport Application..."
+echo_message "[4/7] Installing Skyport Application..."
 cd /opt
 
 if [ -d "oversee-fixed" ]; then
@@ -144,7 +147,7 @@ echo_info "Installing npm dependencies..."
 npm install
 
 # Remove wallet components
-echo_message "[5/6] Removing wallet features..."
+echo_message "[5/7] Removing wallet features..."
 find . -type f \( -name "*.js" -o -name "*.ejs" -o -name "*.html" -o -name "*.json" \) -exec sed -i '
 /wallet/d
 /Wallet/d
@@ -191,7 +194,7 @@ npm run seed 2>/dev/null || echo "Seed completed"
 npm run createUser 2>/dev/null || echo "User creation completed"
 
 # Create systemd service
-echo_message "[6/6] Creating system services..."
+echo_message "[6/7] Creating system services..."
 
 # Skyport service
 cat > /etc/systemd/system/skyport.service << EOF
@@ -206,6 +209,7 @@ WorkingDirectory=/opt/oversee-fixed
 ExecStart=/usr/bin/node /opt/oversee-fixed/app.js
 Restart=always
 RestartSec=10
+Environment=NODE_ENV=production
 
 [Install]
 WantedBy=multi-user.target
@@ -235,6 +239,8 @@ EOF
 systemctl daemon-reload
 systemctl enable skyport.service
 systemctl enable fivem.service
+
+echo_message "[7/7] Creating management scripts..."
 
 # Create management scripts
 cat > /usr/local/bin/start-skyport << 'EOF'
@@ -277,7 +283,121 @@ cat > /usr/local/bin/fivem-status << 'EOF'
 systemctl status fivem
 EOF
 
-# Make scripts executable
+# POPRAWIONY skrypt zarządzania zasobami
+cat > /usr/local/bin/manage-resources << 'EOF'
+#!/bin/bash
+
+# Colors
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+YELLOW='\033[0;33m'
+NC='\033[0m'
+
+echo_info() { echo -e "${GREEN}$1${NC}"; }
+echo_error() { echo -e "${RED}$1${NC}"; }
+echo_warning() { echo -e "${YELLOW}$1${NC}"; }
+
+RESOURCES_DIR="/opt/fivem-assets/resources"
+
+if [ ! -d "$RESOURCES_DIR" ]; then
+    echo_error "Resources directory does not exist: $RESOURCES_DIR"
+    exit 1
+fi
+
+case "$1" in
+    "list")
+        echo_info "=== Available FiveM Resources ==="
+        if [ "$(ls -A $RESOURCES_DIR 2>/dev/null)" ]; then
+            ls -la "$RESOURCES_DIR"
+        else
+            echo_warning "No resources found"
+        fi
+        ;;
+    "add")
+        if [ -z "$2" ]; then
+            echo_error "Usage: manage-resources add <git-repository-url> [resource-name]"
+            exit 1
+        fi
+        
+        REPO_URL="$2"
+        if [ -n "$3" ]; then
+            RESOURCE_NAME="$3"
+        else
+            RESOURCE_NAME=$(basename "$REPO_URL" .git)
+        fi
+        
+        echo_info "Adding resource: $RESOURCE_NAME"
+        cd "$RESOURCES_DIR"
+        
+        if git clone "$REPO_URL" "$RESOURCE_NAME" 2>/dev/null; then
+            echo_info "✓ Resource '$RESOURCE_NAME' added successfully"
+        else
+            echo_error "✗ Failed to add resource '$RESOURCE_NAME'"
+            exit 1
+        fi
+        ;;
+    "remove")
+        if [ -z "$2" ]; then
+            echo_error "Usage: manage-resources remove <resource-name>"
+            echo_info "Available resources:"
+            ls "$RESOURCES_DIR" 2>/dev/null || echo "No resources"
+            exit 1
+        fi
+        
+        RESOURCE_NAME="$2"
+        RESOURCE_PATH="$RESOURCES_DIR/$RESOURCE_NAME"
+        
+        if [ ! -d "$RESOURCE_PATH" ]; then
+            echo_error "Resource '$RESOURCE_NAME' does not exist"
+            echo_info "Available resources:"
+            ls "$RESOURCES_DIR" 2>/dev/null || echo "No resources"
+            exit 1
+        fi
+        
+        echo_warning "Removing resource: $RESOURCE_NAME"
+        rm -rf "$RESOURCE_PATH"
+        echo_info "✓ Resource '$RESOURCE_NAME' removed successfully"
+        ;;
+    "update")
+        if [ -z "$2" ]; then
+            echo_info "Updating all resources..."
+            cd "$RESOURCES_DIR"
+            for dir in */; do
+                dir=${dir%/}
+                if [ -d "$dir/.git" ]; then
+                    echo_info "Updating $dir..."
+                    cd "$dir"
+                    git pull
+                    cd ..
+                fi
+            done
+            echo_info "✓ All resources updated"
+        else
+            RESOURCE_NAME="$2"
+            RESOURCE_PATH="$RESOURCES_DIR/$RESOURCE_NAME"
+            if [ -d "$RESOURCE_PATH/.git" ]; then
+                echo_info "Updating $RESOURCE_NAME..."
+                cd "$RESOURCE_PATH"
+                git pull
+                echo_info "✓ Resource '$RESOURCE_NAME' updated"
+            else
+                echo_error "Resource '$RESOURCE_NAME' is not a git repository or doesn't exist"
+            fi
+        fi
+        ;;
+    *)
+        echo_error "Usage: manage-resources {list|add|remove|update}"
+        echo_info "Commands:"
+        echo_info "  list                          - List all resources"
+        echo_info "  add <url> [name]             - Add resource from Git"
+        echo_info "  remove <name>                - Remove resource"
+        echo_info "  update [name]                - Update all or specific resource"
+        exit 1
+        ;;
+esac
+EOF
+
+# Make all scripts executable
 chmod +x /usr/local/bin/start-skyport
 chmod +x /usr/local/bin/stop-skyport
 chmod +x /usr/local/bin/restart-skyport
@@ -285,6 +405,7 @@ chmod +x /usr/local/bin/skyport-status
 chmod +x /usr/local/bin/start-fivem
 chmod +x /usr/local/bin/stop-fivem
 chmod +x /usr/local/bin/fivem-status
+chmod +x /usr/local/bin/manage-resources
 
 # Set permissions
 chown -R root:root /opt/oversee-fixed
@@ -296,7 +417,7 @@ echo_info "=== INFORMACJE ==="
 echo "Skyport Panel: http://$(curl -s ifconfig.me):3001"
 echo "FiveM Server:  $(curl -s ifconfig.me):30120"
 echo ""
-echo_info "=== MANAGMENT COMMANDS ==="
+echo_info "=== MANAGEMENT COMMANDS ==="
 echo "skyport-status    - Status panelu"
 echo "start-skyport     - Uruchom panel"
 echo "stop-skyport      - Zatrzymaj panel"
@@ -305,6 +426,13 @@ echo ""
 echo "fivem-status      - Status serwera FiveM"
 echo "start-fivem       - Uruchom FiveM"
 echo "stop-fivem        - Zatrzymaj FiveM"
+echo ""
+echo "manage-resources  - Zarządzanie zasobami FiveM"
+echo ""
+echo_info "=== PRZYKŁADY ZASOBÓW ==="
+echo "manage-resources add https://github.com/ESX-Org/es_extended.git"
+echo "manage-resources add https://github.com/ESX-Org/esx_menu_default.git"
+echo "manage-resources list"
 echo ""
 echo_warning "=== KONFIGURACJA ==="
 echo "1. Edytuj /opt/fivem-assets/server.cfg"
@@ -318,9 +446,12 @@ echo_info "Starting services..."
 systemctl start skyport
 systemctl start fivem
 
+# Wait a moment for services to start
+sleep 3
+
 # Show status
 echo ""
 echo_info "=== STATUS USŁUG ==="
-systemctl status skyport --no-pager
+skyport-status
 echo ""
-systemctl status fivem --no-pager
+fivem-status
