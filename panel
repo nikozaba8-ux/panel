@@ -2,7 +2,7 @@
 
 # GO Game - Auto Public Dashboard
 # Autor: Kacpros
-# Wersja: 11.0 - Enhanced Version with Backup, Validation & Logging
+# Wersja: 11.0 - Single Port 8080
 
 # Kolory
 BLUE='\033[0;34m'
@@ -45,16 +45,6 @@ check_dependencies() {
         fi
     fi
     
-    # Sprawdź netstat dla sprawdzania portów
-    if ! command -v netstat &> /dev/null && ! command -v ss &> /dev/null; then
-        print_warning "Netstat/ss nie znalezione, instaluję net-tools..."
-        if command -v apt-get &> /dev/null; then
-            apt-get install -y net-tools
-        elif command -v yum &> /dev/null; then
-            yum install -y net-tools
-        fi
-    fi
-    
     if [ ${#missing_deps[@]} -ne 0 ]; then
         print_error "Brakujące zależności: ${missing_deps[*]}"
         return 1
@@ -64,49 +54,37 @@ check_dependencies() {
     return 0
 }
 
-# Sprawdź dostępność portów
-check_ports_availability() {
-    local ports=("$@")
-    local occupied_ports=()
+# Sprawdź dostępność portu
+check_port_availability() {
+    local port=$1
     
-    print_info "Sprawdzanie dostępności portów..."
+    print_info "Sprawdzanie dostępności portu $port..."
     
-    for port in "${ports[@]}"; do
-        if (command -v netstat >/dev/null && netstat -tuln | grep -q ":${port} ") || 
-           (command -v ss >/dev/null && ss -tuln | grep -q ":${port} ") || 
-           (command -v lsof >/dev/null && lsof -i :${port} >/dev/null 2>&1); then
-            occupied_ports+=("$port")
-            print_warning "Port $port jest już zajęty"
-        else
-            print_debug "Port $port jest dostępny"
-        fi
-    done
-    
-    if [ ${#occupied_ports[@]} -ne 0 ]; then
-        print_error "Następujące porty są już zajęte: ${occupied_ports[*]}"
+    if (command -v netstat >/dev/null && netstat -tuln | grep -q ":${port} ") || 
+       (command -v ss >/dev/null && ss -tuln | grep -q ":${port} ") || 
+       (command -v lsof >/dev/null && lsof -i :${port} >/dev/null 2>&1); then
+        print_error "Port $port jest już zajęty!"
         return 1
+    else
+        print_success "Port $port jest dostępny"
+        return 0
     fi
-    
-    print_success "Wszystkie porty są dostępne"
-    return 0
 }
 
 # Backup istniejącej instalacji
 backup_existing() {
     local backup_dir="backups"
     
-    if [ -d "go-game-public" ]; then
+    if [ -d "go-game-single" ]; then
         print_info "Znaleziono istniejącą instalację, tworzenie backupu..."
         
         mkdir -p "$backup_dir"
         local backup_name="go-game-backup-$(date +%Y%m%d-%H%M%S)"
         local backup_path="$backup_dir/$backup_name"
         
-        if cp -r go-game-public "$backup_path"; then
+        if cp -r go-game-single "$backup_path"; then
             print_success "Backup utworzony: $backup_path"
-            
-            # Usuń starą instalację
-            rm -rf go-game-public
+            rm -rf go-game-single
             print_info "Stara instalacja usunięta"
         else
             print_error "Nie udało się utworzyć backupu!"
@@ -121,14 +99,12 @@ backup_existing() {
 get_public_ip() {
     print_info "Pobieranie publicznego adresu IP..."
     
-    # Lista serwisów do sprawdzenia IP
     local services=(
         "https://ifconfig.me/ip"
         "https://api.ipify.org"
         "https://checkip.amazonaws.com"
         "https://icanhazip.com"
         "https://ipecho.net/plain"
-        "https://ident.me"
     )
     
     local ip=""
@@ -137,136 +113,57 @@ get_public_ip() {
         print_debug "Próba pobrania z: $service"
         ip=$(curl -s --max-time 5 "$service" 2>/dev/null | tr -d '[:space:]')
         
-        # Walidacja IP
         if [[ -n "$ip" && "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ && "$ip" != "127.0.0.1" ]]; then
             print_success "Publiczny IP uzyskany z $service: $ip"
             break
         fi
-        
         ip=""
     done
     
-    # Fallback na lokalny IP
     if [ -z "$ip" ]; then
         print_warning "Nie udało się pobrać publicznego IP, używam lokalnego..."
-        
-        # Spróbuj różne metody uzyskania lokalnego IP
         ip=$(hostname -I 2>/dev/null | awk '{print $1}')
         [ -z "$ip" ] && ip=$(ip route get 1 2>/dev/null | awk '{print $7; exit}')
-        [ -z "$ip" ] && ip=$(ip addr show 2>/dev/null | grep -oP 'inet \K[\d.]+' | grep -v '127.0.0.1' | head -1)
         [ -z "$ip" ] && ip="localhost"
-        
         print_warning "Używam lokalnego adresu: $ip"
-        print_warning "UWAGA: Platforma może nie być dostępna publicznie!"
     fi
     
     echo "$ip"
 }
 
-# Otwórz porty w firewall
-open_ports() {
-    local ports=("$@")
+# Otwórz port w firewall
+open_port() {
+    local port=$1
     
-    print_info "Konfiguracja firewalla..."
+    print_info "Konfiguracja firewalla dla portu $port..."
     
-    # Sprawdź dostępne narzędzia firewall
     if command -v ufw >/dev/null 2>&1; then
-        # UFW (Ubuntu/Debian)
-        print_info "Wykryto UFW, konfiguruję porty..."
-        
-        for port in "${ports[@]}"; do
-            if ! ufw status | grep -q "$port/tcp"; then
-                print_info "Otwieram port $port w UFW..."
-                ufw allow "$port/tcp" >/dev/null 2>&1
-                if [ $? -eq 0 ]; then
-                    print_success "Port $port otwarty w UFW"
-                else
-                    print_warning "Nie udało się otworzyć portu $port w UFW"
-                fi
-            else
-                print_debug "Port $port już otwarty w UFW"
-            fi
-        done
-        
-        # Włącz firewall jeśli nieaktywny
-        if ! ufw status | grep -q "Status: active"; then
-            print_info "Aktywuję UFW..."
-            echo "y" | ufw --force enable >/dev/null 2>&1
+        if ! ufw status | grep -q "$port/tcp"; then
+            print_info "Otwieram port $port w UFW..."
+            ufw allow "$port/tcp" >/dev/null 2>&1 && print_success "Port $port otwarty w UFW"
+        else
+            print_debug "Port $port już otwarty w UFW"
         fi
+        echo "y" | ufw --force enable >/dev/null 2>&1
         
     elif command -v firewall-cmd >/dev/null 2>&1; then
-        # firewalld (CentOS/RHEL)
-        print_info "Wykryto firewalld, konfiguruję porty..."
-        
-        for port in "${ports[@]}"; do
-            if ! firewall-cmd --list-ports | grep -q "$port/tcp"; then
-                print_info "Otwieram port $port w firewalld..."
-                firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1
-                if [ $? -eq 0 ]; then
-                    print_success "Port $port otwarty w firewalld"
-                else
-                    print_warning "Nie udało się otworzyć portu $port w firewalld"
-                fi
-            else
-                print_debug "Port $port już otwarty w firewalld"
-            fi
-        done
-        
+        if ! firewall-cmd --list-ports | grep -q "$port/tcp"; then
+            print_info "Otwieram port $port w firewalld..."
+            firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1 && print_success "Port $port otwarty w firewalld"
+        else
+            print_debug "Port $port już otwarty w firewalld"
+        fi
         firewall-cmd --reload >/dev/null 2>&1
-        print_success "Firewalld zreloadowany"
         
     elif command -v iptables >/dev/null 2>&1; then
-        # iptables (ogólny Linux)
-        print_info "Wykryto iptables, konfiguruję porty..."
+        print_info "Otwieram port $port w iptables..."
+        iptables -A INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1 && print_success "Port $port otwarty w iptables"
         
-        for port in "${ports[@]}"; do
-            print_info "Otwieram port $port w iptables..."
-            iptables -A INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1
-            if [ $? -eq 0 ]; then
-                print_success "Port $port otwarty w iptables"
-            else
-                print_warning "Nie udało się otworzyć portu $port w iptables"
-            fi
-        done
-        
-        # Zapisz reguły jeśli iptables-persistent jest dostępny
         if command -v iptables-save >/dev/null 2>&1 && [ -d "/etc/iptables" ]; then
             iptables-save > /etc/iptables/rules.v4
-            print_info "Reguły iptables zapisane"
         fi
-        
     else
-        print_warning "Nie znaleziono narzędzia firewall, pomijam konfigurację portów"
-        print_warning "UWAGA: Porty mogą być zamknięte w zaporze!"
-    fi
-}
-
-# Sprawdź czy port jest dostępny z zewnątrz
-test_port_public() {
-    local ip=$1
-    local port=$2
-    
-    print_debug "Testowanie portu $ip:$port..."
-    
-    # Różne metody testowania portów
-    if command -v nc >/dev/null 2>&1; then
-        # Użyj netcat
-        timeout 5 bash -c "echo > /dev/tcp/$ip/$port" 2>/dev/null
-        local result=$?
-        [ $result -eq 0 ] && print_debug "Port $port dostępny (netcat)" || print_debug "Port $port niedostępny (netcat)"
-        return $result
-        
-    elif command -v telnet >/dev/null 2>&1; then
-        # Użyj telnet
-        timeout 5 telnet "$ip" "$port" 2>&1 | grep -q "Connected"
-        local result=$?
-        [ $result -eq 0 ] && print_debug "Port $port dostępny (telnet)" || print_debug "Port $port niedostępny (telnet)"
-        return $result
-        
-    else
-        # Fallback - załóżmy że port jest dostępny
-        print_debug "Brak narzędzi do testowania portów, zakładam dostępność"
-        return 0
+        print_warning "Nie znaleziono narzędzia firewall"
     fi
 }
 
@@ -276,27 +173,21 @@ check_system_requirements() {
     
     local errors=0
     
-    # Sprawdź dostępność pamięci
     local free_memory=$(free -m 2>/dev/null | awk '/Mem:/ {print $2}')
-    if [ -n "$free_memory" ] && [ "$free_memory" -lt 1024 ]; then
-        print_warning "Mało pamięci RAM: ${free_memory}MB (wymagane min. 1GB)"
+    if [ -n "$free_memory" ] && [ "$free_memory" -lt 512 ]; then
+        print_warning "Mało pamięci RAM: ${free_memory}MB (wymagane min. 512MB)"
         ((errors++))
     else
         print_success "Pamięć RAM: ${free_memory}MB"
     fi
     
-    # Sprawdź dostępność miejsca na dysku
     local free_disk=$(df -m . | awk 'NR==2 {print $4}')
-    if [ -n "$free_disk" ] && [ "$free_disk" -lt 512 ]; then
-        print_warning "Mało miejsca na dysku: ${free_disk}MB (wymagane min. 512MB)"
+    if [ -n "$free_disk" ] && [ "$free_disk" -lt 256 ]; then
+        print_warning "Mało miejsca na dysku: ${free_disk}MB (wymagane min. 256MB)"
         ((errors++))
     else
         print_success "Miejsce na dysku: ${free_disk}MB"
     fi
-    
-    # Sprawdź wersję kernela
-    local kernel_version=$(uname -r)
-    print_info "Wersja kernela: $kernel_version"
     
     if [ $errors -gt 0 ]; then
         print_warning "Wykryto problemy z wymaganiami systemowymi"
@@ -317,88 +208,18 @@ install_docker() {
     fi
     
     print_info "Instalacja Docker..."
+    curl -fsSL https://get.docker.com -o get-docker.sh
+    sh get-docker.sh
+    rm get-docker.sh
     
-    # Sprawdź dystrybucję
-    if [ -f /etc/os-release ]; then
-        . /etc/os-release
-        local os=$ID
-    else
-        print_error "Nie można określić dystrybucji Linux"
-        return 1
-    fi
-    
-    case $os in
-        ubuntu|debian)
-            print_info "Instalacja Docker dla Ubuntu/Debian..."
-            apt-get update
-            apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release
-            curl -fsSL https://download.docker.com/linux/$os/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
-            echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/$os $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
-            apt-get update
-            apt-get install -y docker-ce docker-ce-cli containerd.io
-            ;;
-        centos|rhel|fedora)
-            print_info "Instalacja Docker dla CentOS/RHEL/Fedora..."
-            yum install -y yum-utils
-            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
-            yum install -y docker-ce docker-ce-cli containerd.io
-            ;;
-        *)
-            print_warning "Nierozpoznana dystrybucja, używam universal install script..."
-            curl -fsSL https://get.docker.com -o get-docker.sh
-            sh get-docker.sh
-            rm get-docker.sh
-            ;;
-    esac
-    
-    # Uruchom i włącz Docker
     systemctl start docker
     systemctl enable docker
     
-    # Sprawdź czy Docker działa
     if docker info >/dev/null 2>&1; then
-        print_success "Docker zainstalowany i uruchomiony pomyślnie"
+        print_success "Docker zainstalowany i uruchomiony"
         return 0
     else
         print_error "Docker nie uruchomił się poprawnie"
-        return 1
-    fi
-}
-
-# Instalacja docker-compose
-install_docker_compose() {
-    print_info "Sprawdzanie instalacji Docker Compose..."
-    
-    if command -v docker-compose &> /dev/null; then
-        print_success "Docker Compose jest już zainstalowany"
-        return 0
-    fi
-    
-    print_info "Instalacja Docker Compose..."
-    
-    # Pobierz najnowszą wersję
-    local latest_version=$(curl -s https://api.github.com/repos/docker/compose/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-    
-    if [ -z "$latest_version" ]; then
-        latest_version="v2.20.0" # Fallback version
-        print_warning "Nie udało się pobrać najnowszej wersji, używam $latest_version"
-    fi
-    
-    print_info "Pobieranie Docker Compose $latest_version..."
-    
-    curl -L "https://github.com/docker/compose/releases/download/$latest_version/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-    chmod +x /usr/local/bin/docker-compose
-    
-    # Utwórz link symboliczny jeśli potrzebny
-    if [ ! -f /usr/bin/docker-compose ]; then
-        ln -s /usr/local/bin/docker-compose /usr/bin/docker-compose 2>/dev/null || true
-    fi
-    
-    if docker-compose --version &>/dev/null; then
-        print_success "Docker Compose zainstalowany pomyślnie"
-        return 0
-    else
-        print_error "Docker Compose nie zainstalował się poprawnie"
         return 1
     fi
 }
@@ -407,20 +228,16 @@ install_docker_compose() {
 install_go_game() {
     clear
     echo -e "${PURPLE}"
-    echo "╔════════════════════════════════════════════════════╗"
-    echo "║           GO GAME - PUBLIC DASHBOARD v11.0        ║"
-    echo "║           Enhanced with Backup & Validation       ║"
-    echo "╚════════════════════════════════════════════════════╝"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║           GO GAME - SINGLE PORT 8080        ║"
+    echo "║           Auto Public IP + One Port         ║"
+    echo "╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
     
-    # Ustawienie portów
-    local FRONTEND_PORT=19210
-    local BACKEND_PORT=19211
-    local DB_PORT=19212
-    local REDIS_PORT=19213
-    local PORTS=($FRONTEND_PORT $BACKEND_PORT $DB_PORT $REDIS_PORT)
+    # Ustawienie portu
+    local MAIN_PORT=8080
     
-    print_header "Rozpoczynanie instalacji GO Game Public Platform..."
+    print_header "Rozpoczynanie instalacji GO Game Single Port..."
     
     # 1. Konfiguracja logowania
     setup_logging
@@ -434,9 +251,9 @@ install_go_game() {
     # 3. Sprawdź wymagania systemowe
     check_system_requirements
     
-    # 4. Sprawdź porty
-    if ! check_ports_availability "${PORTS[@]}"; then
-        print_error "Niektóre porty są zajęte, instalacja przerwana"
+    # 4. Sprawdź port
+    if ! check_port_availability $MAIN_PORT; then
+        print_error "Port $MAIN_PORT jest zajęty, instalacja przerwana"
         exit 1
     fi
     
@@ -451,14 +268,10 @@ install_go_game() {
     SERVER_IP=$(get_public_ip)
     
     print_success "Adres serwera: $SERVER_IP"
-    print_info "Konfiguracja portów:"
-    print_info "Frontend port: $FRONTEND_PORT"
-    print_info "Backend port: $BACKEND_PORT"
-    print_info "Database port: $DB_PORT"
-    print_info "Redis port: $REDIS_PORT"
+    print_success "Główny port: $MAIN_PORT"
     
-    # 7. Otwórz porty w firewall
-    open_ports "${PORTS[@]}"
+    # 7. Otwórz port w firewall
+    open_port $MAIN_PORT
     
     # 8. Instalacja Docker
     if ! install_docker; then
@@ -466,29 +279,23 @@ install_go_game() {
         exit 1
     fi
     
-    # 9. Instalacja docker-compose
-    if ! install_docker_compose; then
-        print_error "Instalacja Docker Compose nie powiodła się"
-        exit 1
-    fi
-    
-    # 10. Tworzenie struktury projektu
+    # 9. Tworzenie struktury projektu
     print_info "Tworzenie struktury projektu..."
-    mkdir -p go-game-public/{frontend,backend,database,scripts,logs,nginx,backups}
+    mkdir -p go-game-single/{app,logs,backups}
     
-    # 11. docker-compose.yml
+    # 10. docker-compose.yml
     print_info "Konfiguracja Docker Compose..."
-    cat > go-game-public/docker-compose.yml << EOF
+    cat > go-game-single/docker-compose.yml << EOF
 version: '3.8'
 services:
-  frontend:
+  go-game:
     image: node:18-alpine
     working_dir: /app
     volumes:
-      - ./frontend:/app
-      - ./logs/frontend:/app/logs
+      - ./app:/app
+      - ./logs:/app/logs
     ports:
-      - "0.0.0.0:$FRONTEND_PORT:8080"
+      - "0.0.0.0:8080:8080"
     command: sh -c "npm install && node server.js"
     restart: unless-stopped
     healthcheck:
@@ -496,88 +303,14 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-    networks:
-      - go-game-network
-
-  backend:
-    image: node:18-alpine  
-    working_dir: /app
-    volumes:
-      - ./backend:/app
-      - ./logs/backend:/app/logs
-    ports:
-      - "0.0.0.0:$BACKEND_PORT:3001"
-    command: sh -c "npm install && node server.js"
-    restart: unless-stopped
-    depends_on:
-      - postgres
-    healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - go-game-network
-
-  postgres:
-    image: postgres:15-alpine
-    environment:
-      - POSTGRES_DB=gogame
-      - POSTGRES_USER=gogame
-      - POSTGRES_PASSWORD=gogame123
-    ports:
-      - "0.0.0.0:$DB_PORT:5432"
-    volumes:
-      - ./database/postgres:/var/lib/postgresql/data
-      - ./logs/postgres:/var/log/postgresql
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gogame -d gogame"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - go-game-network
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "0.0.0.0:$REDIS_PORT:6379"
-    volumes:
-      - ./database/redis:/data
-      - ./logs/redis:/var/log/redis
-    restart: unless-stopped
-    command: redis-server --appendonly yes --bind 0.0.0.0
-    networks:
-      - go-game-network
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "0.0.0.0:80:80"
-      - "0.0.0.0:443:443"
-    volumes:
-      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
-      - ./logs/nginx:/var/log/nginx
-    depends_on:
-      - frontend
-      - backend
-    restart: unless-stopped
-    networks:
-      - go-game-network
-
-networks:
-  go-game-network:
-    driver: bridge
-    name: go-game-network
 EOF
 
-    # 12. Frontend z PUBLICZNYM IP
-    print_info "Tworzenie frontendu z publicznym dostępem..."
+    # 11. Aplikacja główna
+    print_info "Tworzenie aplikacji głównej..."
     
-    cat > go-game-public/frontend/package.json << 'EOF'
+    cat > go-game-single/app/package.json << 'EOF'
 {
-  "name": "go-game-frontend",
+  "name": "go-game-single",
   "version": "1.0.0",
   "type": "module",
   "scripts": {
@@ -586,13 +319,12 @@ EOF
   },
   "dependencies": {
     "express": "^4.18.0",
-    "cors": "^2.8.5",
-    "axios": "^1.3.0"
+    "cors": "^2.8.5"
   }
 }
 EOF
 
-    cat > go-game-public/frontend/server.js << EOF
+    cat > go-game-single/app/server.js << EOF
 const express = require('express');
 const cors = require('cors');
 const app = express();
@@ -602,16 +334,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+// Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ 
-    status: 'healthy', 
-    service: 'frontend', 
+    status: 'healthy',
+    service: 'go-game-single-port',
     port: PORT,
-    public_url: 'http://$SERVER_IP:$FRONTEND_PORT',
-    timestamp: new Date().toISOString()
+    public_url: 'http://$SERVER_IP:$MAIN_PORT',
+    server_ip: '$SERVER_IP',
+    timestamp: new Date().toISOString(),
+    version: '1.0'
   });
 });
 
+// Main page
 app.get('/', (req, res) => {
   res.send(`
 <!DOCTYPE html>
@@ -619,7 +355,7 @@ app.get('/', (req, res) => {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>GO Game - Public Platform v11.0</title>
+    <title>GO Game - Single Port Platform</title>
     <style>
         * { 
             margin: 0; 
@@ -658,18 +394,8 @@ app.get('/', (req, res) => {
             margin-bottom: 1rem;
         }
         
-        .version {
+        .single-port-badge {
             background: #805ad5;
-            color: white;
-            padding: 0.3rem 1rem;
-            border-radius: 15px;
-            font-size: 0.9rem;
-            display: inline-block;
-            margin-bottom: 0.5rem;
-        }
-        
-        .public-badge {
-            background: #48bb78;
             color: white;
             padding: 0.5rem 1rem;
             border-radius: 25px;
@@ -782,14 +508,6 @@ app.get('/', (req, res) => {
             border-bottom: none;
         }
         
-        .backup-info {
-            background: rgba(106, 90, 205, 0.2);
-            padding: 1rem;
-            border-radius: 10px;
-            margin: 1rem 0;
-            border-left: 4px solid #6a5acd;
-        }
-        
         @media (max-width: 768px) {
             .container {
                 padding: 10px;
@@ -814,20 +532,19 @@ app.get('/', (req, res) => {
     <div class="container">
         <!-- Header -->
         <div class="header">
-            <div class="version">v11.0 ENHANCED</div>
-            <div class="logo">🎮 GO GAME PUBLIC</div>
-            <div class="public-badge">🌐 PUBLICZNY DOSTĘP</div>
-            <p>Platforma dostępna z całego świata</p>
+            <div class="logo">🎮 GO GAME SINGLE PORT</div>
+            <div class="single-port-badge">🔒 JEDEN PORT: 8080</div>
+            <p>Platforma dostępna z całego świata przez jeden port</p>
         </div>
 
         <!-- Public URL -->
         <div class="info-panel">
             <h2>🌍 Publiczny Adres Platformy</h2>
             <div class="url-display">
-                http://$SERVER_IP:$FRONTEND_PORT
+                http://$SERVER_IP:$MAIN_PORT
             </div>
             <p style="text-align: center; margin-top: 1rem;">
-                <strong>Ten adres działa z każdego miejsca na świecie!</strong>
+                <strong>Wszystko przez jeden port 8080!</strong>
             </p>
             <div style="text-align: center; margin-top: 1rem;">
                 <button class="btn btn-success" onclick="copyUrl()">📋 Kopiuj Adres</button>
@@ -836,18 +553,16 @@ app.get('/', (req, res) => {
             </div>
         </div>
 
-        <!-- Backup Info -->
-        <div class="backup-info">
-            <h3>💾 System Backupu</h3>
-            <p>Twoja instalacja jest automatycznie backupowana. Wszystkie pliki konfiguracyjne są zabezpieczone.</p>
-        </div>
-
         <!-- Access Information -->
         <div class="access-info">
             <h2>📡 Informacje o Dostępie</h2>
             <div class="status-item">
                 <span>Publiczny adres:</span>
-                <strong>http://$SERVER_IP:$FRONTEND_PORT</strong>
+                <strong>http://$SERVER_IP:$MAIN_PORT</strong>
+            </div>
+            <div class="status-item">
+                <span>Port:</span>
+                <strong>$MAIN_PORT (jeden dla wszystkiego)</strong>
             </div>
             <div class="status-item">
                 <span>Status portu:</span>
@@ -858,20 +573,12 @@ app.get('/', (req, res) => {
                 <strong>🌍 Cały świat</strong>
             </div>
             <div class="status-item">
-                <span>Port frontend:</span>
-                <strong>$FRONTEND_PORT</strong>
-            </div>
-            <div class="status-item">
-                <span>Port backend:</span>
-                <strong>$BACKEND_PORT</strong>
+                <span>Architektura:</span>
+                <strong>Single Port Application</strong>
             </div>
             <div class="status-item">
                 <span>Admin panel:</span>
                 <strong>kacpros</strong>
-            </div>
-            <div class="status-item">
-                <span>Wersja:</span>
-                <strong>11.0 Enhanced</strong>
             </div>
         </div>
 
@@ -881,9 +588,9 @@ app.get('/', (req, res) => {
             <div style="background: rgba(0,0,0,0.3); padding: 1.5rem; border-radius: 10px; margin: 1rem 0;">
                 <strong>Użytkownik:</strong> kacpros<br>
                 <strong>Rola:</strong> Właściciel<br>
-                <strong>Publiczny URL:</strong> http://$SERVER_IP:$FRONTEND_PORT<br>
-                <strong>Data uruchomienia:</strong> <span id="start-time"></span><br>
-                <strong>Wersja:</strong> 11.0 Enhanced
+                <strong>Publiczny URL:</strong> http://$SERVER_IP:$MAIN_PORT<br>
+                <strong>Port:</strong> $MAIN_PORT<br>
+                <strong>Data uruchomienia:</strong> <span id="start-time"></span>
             </div>
             <button class="btn" onclick="showAdminPanel()">Otwórz Panel Admina</button>
         </div>
@@ -913,6 +620,17 @@ app.get('/', (req, res) => {
             </div>
         </div>
 
+        <!-- API Info -->
+        <div class="info-panel">
+            <h2>🔧 API Endpoints</h2>
+            <div style="background: rgba(0,0,0,0.3); padding: 1.5rem; border-radius: 10px; margin: 1rem 0;">
+                <strong>Health Check:</strong> http://$SERVER_IP:$MAIN_PORT/health<br>
+                <strong>Games API:</strong> http://$SERVER_IP:$MAIN_PORT/api/games<br>
+                <strong>User Info:</strong> http://$SERVER_IP:$MAIN_PORT/api/user/kacpros<br>
+                <strong>Admin Stats:</strong> http://$SERVER_IP:$MAIN_PORT/api/admin/stats
+            </div>
+        </div>
+
         <!-- Quick Access -->
         <div style="text-align: center; margin: 3rem 0;">
             <h2>⚡ Szybki Dostęp</h2>
@@ -920,7 +638,7 @@ app.get('/', (req, res) => {
                 🌐 Otwórz Platformę
             </button>
             <p style="margin-top: 1rem; color: #cbd5e0;">
-                Adres: http://$SERVER_IP:$FRONTEND_PORT
+                Adres: http://$SERVER_IP:$MAIN_PORT
             </p>
         </div>
     </div>
@@ -930,23 +648,23 @@ app.get('/', (req, res) => {
         document.getElementById('start-time').textContent = new Date().toLocaleString();
         
         function copyUrl() {
-            const url = 'http://$SERVER_IP:$FRONTEND_PORT';
+            const url = 'http://$SERVER_IP:$MAIN_PORT';
             navigator.clipboard.writeText(url).then(() => {
-                alert('✅ Adres skopiowany do schowka!\\n' + url + '\\n\\nWersja: 11.0 Enhanced');
+                alert('✅ Adres skopiowany do schowka!\\n' + url);
             });
         }
         
         function openInNewTab() {
-            const url = 'http://$SERVER_IP:$FRONTEND_PORT';
+            const url = 'http://$SERVER_IP:$MAIN_PORT';
             window.open(url, '_blank');
         }
         
         function testAccess() {
-            const url = 'http://$SERVER_IP:$FRONTEND_PORT/health';
+            const url = 'http://$SERVER_IP:$MAIN_PORT/health';
             fetch(url)
                 .then(response => response.json())
                 .then(data => {
-                    alert('✅ Test dostępu udany!\\nPlatforma jest publicznie dostępna.\\n\\nPubliczny URL:\\nhttp://$SERVER_IP:$FRONTEND_PORT\\nWersja: 11.0 Enhanced');
+                    alert('✅ Test dostępu udany!\\nPlatforma jest publicznie dostępna.\\n\\nPubliczny URL:\\nhttp://$SERVER_IP:$MAIN_PORT\\nPort: $MAIN_PORT');
                 })
                 .catch(error => {
                     alert('⚠️ Problem z dostępem publicznym.\\nSprawdź konfigurację sieci.\\nBłąd: ' + error.message);
@@ -955,39 +673,37 @@ app.get('/', (req, res) => {
         
         function showAdminPanel() {
             const adminInfo = 
-                '👑 Publiczny Panel Administratora v11.0\\n\\n' +
+                '👑 Publiczny Panel Administratora\\n\\n' +
                 'Użytkownik: kacpros\\n' +
                 'Rola: Właściciel\\n' +
-                'Publiczny URL: http://$SERVER_IP:$FRONTEND_PORT\\n' +
-                'Porty: $FRONTEND_PORT (front), $BACKEND_PORT (back)\\n' +
-                'Wersja: 11.0 Enhanced\\n\\n' +
+                'Publiczny URL: http://$SERVER_IP:$MAIN_PORT\\n' +
+                'Port: $MAIN_PORT (single port)\\n\\n' +
                 'Platforma jest publicznie dostępna! 🌍';
                 
             alert(adminInfo);
         }
         
         function addToCart(gameName) {
-            alert('🛒 Dodano do koszyka: ' + gameName + '\\n\\nPlatforma publicznie dostępna!\\nWersja: 11.0 Enhanced');
+            alert('🛒 Dodano do koszyka: ' + gameName + '\\n\\nPlatforma publicznie dostępna!\\nPort: $MAIN_PORT');
         }
         
         // Logowanie informacji
-        console.log('🎮 GO Game Public Platform v11.0');
-        console.log('🌍 Public URL: http://$SERVER_IP:$FRONTEND_PORT');
-        console.log('🔧 Backend: http://$SERVER_IP:$BACKEND_PORT');
+        console.log('🎮 GO Game Single Port Platform');
+        console.log('🌍 Public URL: http://$SERVER_IP:$MAIN_PORT');
+        console.log('🔧 Port: $MAIN_PORT');
         console.log('👑 Admin: kacpros');
-        console.log('🚀 Platforma publicznie dostępna!');
-        console.log('💾 System backupu aktywny');
+        console.log('🚀 Platforma publicznie dostępna przez jeden port!');
         
         // Automatyczny test dostępu przy starcie
         setTimeout(testAccess, 1000);
         
         // Pokaż powitanie
         setTimeout(() => {
-            alert('🌍 GO GAME PUBLIC PLATFORM v11.0\\n\\n' +
+            alert('🌍 GO GAME SINGLE PORT PLATFORM\\n\\n' +
                   'Platforma jest teraz publicznie dostępna!\\n' +
-                  'Adres: http://$SERVER_IP:$FRONTEND_PORT\\n' +
-                  'Wersja: 11.0 Enhanced\\n\\n' +
-                  'Możesz udostępnić ten adres innym użytkownikom.');
+                  'Adres: http://$SERVER_IP:$MAIN_PORT\\n' +
+                  'Port: $MAIN_PORT\\n\\n' +
+                  'Wszystko działa przez jeden port!');
         }, 500);
     </script>
 </body>
@@ -995,65 +711,7 @@ app.get('/', (req, res) => {
   `);
 });
 
-app.listen(PORT, '0.0.0.0', () => {
-  console.log('=========================================');
-  console.log('🎮 GO GAME PUBLIC PLATFORM v11.0');
-  console.log('=========================================');
-  console.log('🌍 Public URL: http://$SERVER_IP:$FRONTEND_PORT');
-  console.log('🔧 Backend:    http://$SERVER_IP:$BACKEND_PORT');
-  console.log('🗄️  Database:   $SERVER_IP:$DB_PORT');
-  console.log('👑 Admin:      kacpros');
-  console.log('💾 Backup:     Aktywny');
-  console.log('🚀 Status:     Publicznie dostępna!');
-  console.log('=========================================');
-});
-EOF
-
-    # 13. Backend
-    print_info "Tworzenie backendu z publicznym dostępem..."
-    
-    cat > go-game-public/backend/package.json << 'EOF'
-{
-  "name": "go-game-backend",
-  "version": "1.0.0",
-  "type": "module",
-  "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js"
-  },
-  "dependencies": {
-    "express": "^4.18.0",
-    "cors": "^2.8.5",
-    "pg": "^8.8.0",
-    "redis": "^4.6.4"
-  }
-}
-EOF
-
-    cat > go-game-public/backend/server.js << EOF
-const express = require('express');
-const cors = require('cors');
-const app = express();
-const PORT = 3001;
-
-app.use(cors());
-app.use(express.json());
-
-// Health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'healthy',
-    service: 'go-game-backend',
-    port: PORT,
-    public_url: 'http://$SERVER_IP:$BACKEND_PORT',
-    server_ip: '$SERVER_IP',
-    timestamp: new Date().toISOString(),
-    access: 'public',
-    version: '11.0'
-  });
-});
-
-// Public API Games
+// API Routes
 app.get('/api/games', (req, res) => {
   res.json([
     {
@@ -1086,7 +744,6 @@ app.get('/api/games', (req, res) => {
   ]);
 });
 
-// Public user info
 app.get('/api/user/:discordId', (req, res) => {
   const { discordId } = req.params;
   
@@ -1096,11 +753,9 @@ app.get('/api/user/:discordId', (req, res) => {
       role: 'owner',
       permissions: ['all'],
       public_access: true,
-      version: '11.0',
       server_info: {
         public_ip: '$SERVER_IP',
-        frontend_port: $FRONTEND_PORT,
-        backend_port: $BACKEND_PORT,
+        port: $MAIN_PORT,
         status: 'public'
       }
     });
@@ -1110,31 +765,23 @@ app.get('/api/user/:discordId', (req, res) => {
       role: 'user', 
       permissions: ['basic'],
       public_access: true,
-      version: '11.0',
       joinDate: new Date().toISOString().split('T')[0]
     });
   }
 });
 
-// Public admin stats
-app.get('/api/admin/public-stats', (req, res) => {
+app.get('/api/admin/stats', (req, res) => {
   res.json({
-    platform: 'GO Game Public Platform',
-    version: '11.0',
+    platform: 'GO Game Single Port Platform',
+    version: '1.0',
     status: 'public',
-    public_url: 'http://$SERVER_IP:$FRONTEND_PORT',
-    ports: {
-      frontend: $FRONTEND_PORT,
-      backend: $BACKEND_PORT,
-      database: $DB_PORT,
-      redis: $REDIS_PORT
-    },
+    public_url: 'http://$SERVER_IP:$MAIN_PORT',
     server: {
       ip: '$SERVER_IP',
+      port: $MAIN_PORT,
       access: 'public'
     },
     admin: 'kacpros',
-    features: ['backup', 'validation', 'logging', 'healthcheck'],
     uptime: process.uptime(),
     timestamp: new Date().toISOString()
   });
@@ -1142,348 +789,170 @@ app.get('/api/admin/public-stats', (req, res) => {
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log('=========================================');
-  console.log('🔧 GO GAME PUBLIC BACKEND v11.0');
+  console.log('🎮 GO GAME SINGLE PORT PLATFORM');
   console.log('=========================================');
-  console.log('🌍 Public URL: http://$SERVER_IP:$BACKEND_PORT');
-  console.log('👑 Admin: kacpros');
-  console.log('💾 Backup: Active');
-  console.log('✅ Backend publicznie dostępny!');
+  console.log('🌍 Public URL: http://$SERVER_IP:$MAIN_PORT');
+  console.log('🔧 Port:       $MAIN_PORT');
+  console.log('👑 Admin:      kacpros');
+  console.log('🚀 Status:     Publicznie dostępna!');
   console.log('=========================================');
 });
 EOF
 
-    # 14. Konfiguracja Nginx
-    cat > go-game-public/nginx/nginx.conf << 'EOF'
-events {
-    worker_connections 1024;
-    use epoll;
-    multi_accept on;
-}
-
-http {
-    include /etc/nginx/mime.types;
-    default_type application/octet-stream;
-
-    # Basic Settings
-    sendfile on;
-    tcp_nopush on;
-    tcp_nodelay on;
-    keepalive_timeout 65;
-    types_hash_max_size 2048;
-
-    # Logging
-    access_log /var/log/nginx/access.log;
-    error_log /var/log/nginx/error.log;
-
-    # Gzip Settings
-    gzip on;
-    gzip_vary on;
-    gzip_min_length 1024;
-    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
-
-    # Upstreams
-    upstream frontend {
-        server frontend:8080;
-        keepalive 32;
-    }
-
-    upstream backend {
-        server backend:3001;
-        keepalive 32;
-    }
-
-    # Public HTTP Server
-    server {
-        listen 80;
-        listen [::]:80;
-        server_name _;
-        
-        # Security headers
-        add_header X-Frame-Options "SAMEORIGIN" always;
-        add_header X-XSS-Protection "1; mode=block" always;
-        add_header X-Content-Type-Options "nosniff" always;
-        add_header Referrer-Policy "no-referrer-when-downgrade" always;
-        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
-
-        # Frontend
-        location / {
-            proxy_pass http://frontend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_cache_bypass $http_upgrade;
-            proxy_connect_timeout 60s;
-            proxy_send_timeout 60s;
-            proxy_read_timeout 60s;
-        }
-
-        # Backend API
-        location /api/ {
-            proxy_pass http://backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection 'upgrade';
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-            proxy_cache_bypass $http_upgrade;
-        }
-
-        # WebSocket support
-        location /ws/ {
-            proxy_pass http://backend;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_read_timeout 86400;
-        }
-
-        # Health checks
-        location /health {
-            access_log off;
-            return 200 "healthy\n";
-            add_header Content-Type text/plain;
-        }
-    }
-}
-EOF
-
-    # 15. Skrypty zarządzania
-    print_info "Tworzenie zaawansowanych skryptów zarządzania..."
+    # 12. Skrypty zarządzania
+    print_info "Tworzenie skryptów zarządzania..."
     
-    cat > go-game-public/start.sh << EOF
+    cat > go-game-single/start.sh << EOF
 #!/bin/bash
 
-# Kolory
-GREEN='\\033[0;32m'
-RED='\\033[0;31m'
-BLUE='\\033[0;34m'
-NC='\\033[0m'
-
-echo -e "\${BLUE}🚀 Uruchamianie GO Game Public Platform v11.0...\${NC}"
+echo "🚀 Uruchamianie GO Game Single Port Platform..."
 echo ""
 
 # Sprawdź czy Docker działa
 if ! docker info > /dev/null 2>&1; then
-    echo -e "\${RED}❌ Docker nie jest uruchomiony!\${NC}"
+    echo "❌ Docker nie jest uruchomiony!"
     echo "   Uruchom: sudo systemctl start docker"
     exit 1
 fi
 
-cd go-game-public
+cd go-game-single
 
-echo -e "\${BLUE}📦 Uruchamianie kontenerów Docker...\${NC}"
+echo "📦 Uruchamianie kontenera Docker..."
 docker-compose up -d
 
 echo ""
-echo -e "\${BLUE}⏳ Oczekiwanie na uruchomienie usług...\${NC}"
-sleep 20
+echo "⏳ Oczekiwanie na uruchomienie usługi..."
+sleep 10
 
 # Sprawdź status
 echo ""
-echo -e "\${BLUE}📊 Status usług:\${NC}"
+echo "📊 Status usługi:"
 docker-compose ps
 
 # Test publicznego dostępu
 echo ""
-echo -e "\${BLUE}🔍 Testowanie publicznego dostępu...\${NC}"
+echo "🔍 Testowanie publicznego dostępu..."
 
-if curl -s --max-time 10 "http://localhost:$FRONTEND_PORT/health" > /dev/null; then
-    echo -e "\${GREEN}✅ Frontend działa poprawnie\${NC}"
+if curl -s --max-time 10 "http://localhost:$MAIN_PORT/health" > /dev/null; then
+    echo "✅ Aplikacja działa poprawnie"
 else
-    echo -e "\${RED}⚠️ Frontend może mieć problemy\${NC}"
-fi
-
-if curl -s --max-time 10 "http://localhost:$BACKEND_PORT/health" > /dev/null; then
-    echo -e "\${GREEN}✅ Backend działa poprawnie\${NC}"
-else
-    echo -e "\${RED}⚠️ Backend może mieć problemy\${NC}"
+    echo "⚠️ Aplikacja może mieć problemy"
 fi
 
 echo ""
-echo -e "\${GREEN}===========================================\${NC}"
-echo -e "\${GREEN}🎮 GO GAME PUBLIC PLATFORM - URUCHOMIONA!\${NC}"
-echo -e "\${GREEN}===========================================\${NC}"
-echo -e "\${BLUE}🌍 Publiczny URL: http://$SERVER_IP:$FRONTEND_PORT\${NC}"
-echo -e "\${BLUE}🔧 Backend API:   http://$SERVER_IP:$BACKEND_PORT\${NC}"
-echo -e "\${BLUE}🗄️  Database:      $SERVER_IP:$DB_PORT\${NC}"
-echo -e "\${BLUE}👑 Admin:         kacpros\${NC}"
-echo -e "\${BLUE}💾 Wersja:        11.0 Enhanced\${NC}"
-echo -e "\${GREEN}===========================================\${NC}"
+echo "==========================================="
+echo "🎮 GO GAME SINGLE PORT - URUCHOMIONA!"
+echo "==========================================="
+echo "🌍 Publiczny URL: http://$SERVER_IP:$MAIN_PORT"
+echo "🔧 Port:          $MAIN_PORT"
+echo "👑 Admin:         kacpros"
+echo "==========================================="
 echo ""
-echo -e "\${GREEN}💡 Platforma jest teraz PUBLICZNIE DOSTĘPNA!\${NC}"
+echo "💡 Platforma jest PUBLICZNIE DOSTĘPNA!"
 echo "   Możesz udostępnić ten adres:"
-echo -e "   \${BLUE}http://$SERVER_IP:$FRONTEND_PORT\${NC}"
+echo "   http://$SERVER_IP:$MAIN_PORT"
 echo ""
-echo -e "\${BLUE}🔧 Zarządzanie:\${NC}"
+echo "🔧 Zarządzanie:"
 echo "   • Sprawdź status: ./status.sh"
-echo "   • Zobacz logi: ./logs.sh"
+echo "   • Zobacz logi: ./logs.sh" 
 echo "   • Zatrzymaj: ./stop.sh"
-echo "   • Backup: ./backup.sh"
 echo ""
 EOF
 
-    cat > go-game-public/stop.sh << 'EOF'
+    cat > go-game-single/stop.sh << 'EOF'
 #!/bin/bash
-echo "🛑 Zatrzymywanie GO Game Public Platform..."
-cd go-game-public
+echo "🛑 Zatrzymywanie GO Game Single Port Platform..."
+cd go-game-single
 docker-compose down
 echo "✅ Platforma zatrzymana!"
 EOF
 
-    cat > go-game-public/restart.sh << 'EOF'
+    cat > go-game-single/restart.sh << 'EOF'
 #!/bin/bash
-echo "🔁 Restartowanie GO Game Public Platform..."
-cd go-game-public
+echo "🔁 Restartowanie GO Game Single Port Platform..."
+cd go-game-single
 docker-compose restart
 echo "✅ Platforma zrestartowana!"
 EOF
 
-    cat > go-game-public/logs.sh << 'EOF'
+    cat > go-game-single/logs.sh << 'EOF'
 #!/bin/bash
-echo "📋 Logi GO Game Public Platform:"
-cd go-game-public
+echo "📋 Logi GO Game Single Port Platform:"
+cd go-game-single
 docker-compose logs -f
 EOF
 
-    cat > go-game-public/status.sh << EOF
+    cat > go-game-single/status.sh << EOF
 #!/bin/bash
-echo "📊 Status GO Game Public Platform v11.0:"
-cd go-game-public
+echo "📊 Status GO Game Single Port Platform:"
+cd go-game-single
 docker-compose ps
 
 echo ""
-echo "🌍 Publiczne Adresy Dostępu:"
-echo "   Frontend:  http://$SERVER_IP:$FRONTEND_PORT"
-echo "   Backend:   http://$SERVER_IP:$BACKEND_PORT"
-echo "   Database:  $SERVER_IP:$DB_PORT"
-echo "   Redis:     $SERVER_IP:$REDIS_PORT"
-echo "   HTTP:      http://$SERVER_IP:80"
+echo "🌍 Publiczny Adres Dostępu:"
+echo "   http://$SERVER_IP:$MAIN_PORT"
 echo ""
 echo "👑 Administrator: kacpros"
 echo "🏠 Serwer: $SERVER_IP"
-echo "🔧 Porty: $FRONTEND_PORT, $BACKEND_PORT, $DB_PORT, $REDIS_PORT"
-echo "💾 Wersja: 11.0 Enhanced"
-echo "📅 Data instalacji: $(date)"
+echo "🔧 Port: $MAIN_PORT"
 echo ""
 echo "💡 Platforma jest PUBLICZNIE DOSTĘPNA!"
-echo "   Udostępnij: http://$SERVER_IP:$FRONTEND_PORT"
-EOF
-
-    cat > go-game-public/backup.sh << 'EOF'
-#!/bin/bash
-echo "💾 Tworzenie backupu GO Game Public Platform..."
-
-BACKUP_DIR="backups"
-BACKUP_NAME="go-game-backup-$(date +%Y%m%d-%H%M%S)"
-BACKUP_PATH="$BACKUP_DIR/$BACKUP_NAME"
-
-mkdir -p "$BACKUP_PATH"
-
-# Skopiuj wszystkie ważne pliki
-cp -r docker-compose.yml frontend backend nginx database scripts "$BACKUP_PATH/" 2>/dev/null || true
-
-# Stwórz archiwum
-tar -czf "$BACKUP_PATH.tar.gz" "$BACKUP_PATH" 2>/dev/null && rm -rf "$BACKUP_PATH"
-
-if [ $? -eq 0 ]; then
-    echo "✅ Backup utworzony: $BACKUP_PATH.tar.gz"
-    echo "📁 Lokalizacja: $BACKUP_DIR/"
-else
-    echo "❌ Błąd podczas tworzenia backupu!"
-    exit 1
-fi
-
-# Pokaz listę backupów
-echo ""
-echo "📋 Lista dostępnych backupów:"
-ls -la "$BACKUP_DIR/" | grep go-game-backup
+echo "   Udostępnij: http://$SERVER_IP:$MAIN_PORT"
 EOF
 
     # Nadawanie uprawnień
-    chmod +x go-game-public/*.sh
+    chmod +x go-game-single/*.sh
 
-    print_success "✅ GO Game Public Platform v11.0 gotowa!"
+    print_success "✅ GO Game Single Port Platform gotowa!"
     echo ""
-    echo "📁 Projekt: ./go-game-public/"
+    echo "📁 Projekt: ./go-game-single/"
     echo ""
     echo "🚀 Uruchomienie:"
-    echo "   ./go-game-public/start.sh"
+    echo "   ./go-game-single/start.sh"
     echo ""
     echo "🌍 PUBLICZNY ADRES:"
-    echo "   http://$SERVER_IP:$FRONTEND_PORT"
+    echo "   http://$SERVER_IP:$MAIN_PORT"
     echo ""
-    echo "🔧 Porty otwarte:"
-    echo "   • 19210 - Frontend (główna platforma)"
-    echo "   • 19211 - Backend (API)"
-    echo "   • 19212 - PostgreSQL (baza danych)"
-    echo "   • 19213 - Redis (cache)"
-    echo "   • 80    - HTTP (nginx)"
+    echo "🔧 Jeden port: $MAIN_PORT"
     echo ""
-    echo "💾 Nowe funkcje v11.0:"
-    echo "   ✅ System backupu automatycznego"
-    echo "   ✅ Walidacja portów i zależności"
-    echo "   ✅ Logowanie całej instalacji"
-    echo "   ✅ Sprawdzanie wymagań systemowych"
-    echo "   ✅ Lepsze zarządzanie błędami"
+    print_success "💡 Platforma będzie PUBLICZNIE DOSTĘPNA przez jeden port!"
     echo ""
-    print_success "💡 Platforma będzie PUBLICZNIE DOSTĘPNA z całego świata!"
-    echo ""
-    print_info "Następny krok: Uruchom './go-game-public/start.sh'"
+    print_info "Następny krok: Uruchom './go-game-single/start.sh'"
     
     # Zapisz informacje o instalacji
-    cat > go-game-public/INSTALL_INFO.txt << EOF
-GO GAME PUBLIC PLATFORM v11.0 - INFORMACJE O INSTALACJI
+    cat > go-game-single/INSTALL_INFO.txt << EOF
+GO GAME SINGLE PORT PLATFORM - INFORMACJE O INSTALACJI
 
 Data instalacji: $(date)
-Publiczny adres: http://$SERVER_IP:$FRONTEND_PORT
-Porty:
-  - Frontend: $FRONTEND_PORT
-  - Backend: $BACKEND_PORT
-  - Database: $DB_PORT
-  - Redis: $REDIS_PORT
+Publiczny adres: http://$SERVER_IP:$MAIN_PORT
+Port: $MAIN_PORT
 
 Administrator: kacpros
-Wersja: 11.0 Enhanced
+Architektura: Single Port
 
 SKRYPTY ZARZĄDZANIA:
   ./start.sh    - Uruchom platformę
-  ./stop.sh     - Zatrzymaj platformę
+  ./stop.sh     - Zatrzymaj platformę  
   ./restart.sh  - Restartuj platformę
-  ./status.sh   - Status usług
+  ./status.sh   - Status usługi
   ./logs.sh     - Logi na żywo
-  ./backup.sh   - Utwórz backup
 
 LOG INSTALACJI: $LOG_FILE
 
 UWAGA: Platforma jest publicznie dostępna pod adresem:
-       http://$SERVER_IP:$FRONTEND_PORT
+       http://$SERVER_IP:$MAIN_PORT
 EOF
 
-    print_success "📄 Informacje o instalacji zapisane w: go-game-public/INSTALL_INFO.txt"
+    print_success "📄 Informacje o instalacji zapisane w: go-game-single/INSTALL_INFO.txt"
 }
 
-# Funkcja czyszczenia w przypadku przerwania
+# Funkcja czyszczenia
 cleanup() {
     print_error "Instalacja przerwana!"
-    print_info "Czyszczenie..."
     exit 1
 }
 
-# Przechwyć sygnały przerwania
 trap cleanup SIGINT SIGTERM
 
 # Uruchom instalację
-if [ "$1" = "--debug" ]; then
-    set -x
-fi
-
 install_go_game
