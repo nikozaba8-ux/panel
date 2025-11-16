@@ -1,420 +1,1003 @@
 #!/bin/bash
 
-set -e
-
-######################################################################################
-#                                                                                    #
-# Project 'pterodactyl-installer'                                                    #
-#                                                                                    #
-# Copyright (C) 2018 - 2025, Vilhelm Prytz, <vilhelm@prytznet.se>                    #
-#                                                                                    #
-#   This program is free software: you can redistribute it and/or modify             #
-#   it under the terms of the GNU General Public License as published by             #
-#   the Free Software Foundation, either version 3 of the License, or                #
-#   (at your option) any later version.                                              #
-#                                                                                    #
-#   This program is distributed in the hope that it will be useful,                  #
-#   but WITHOUT ANY WARRANTY; without even the implied warranty of                   #
-#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the                    #
-#   GNU General Public License for more details.                                     #
-#                                                                                    #
-#   You should have received a copy of the GNU General Public License                #
-#   along with this program.  If not, see <https://www.gnu.org/licenses/>.           #
-#                                                                                    #
-# https://github.com/pterodactyl-installer/pterodactyl-installer/blob/master/LICENSE #
-#                                                                                    #
-# This script is not associated with the official Pterodactyl Project.               #
-# https://github.com/pterodactyl-installer/pterodactyl-installer                     #
-#                                                                                    #
-######################################################################################
-
-# Check if script is loaded, load if not or fail otherwise.
-fn_exists() { declare -F "$1" >/dev/null; }
-if ! fn_exists lib_loaded; then
-  # shellcheck source=lib/lib.sh
-  source /tmp/lib.sh || source <(curl -sSL "$GITHUB_BASE_URL/$GITHUB_SOURCE"/lib/lib.sh)
-  ! fn_exists lib_loaded && echo "* ERROR: Could not load lib script" && exit 1
-fi
-
-# ------------------ Variables ----------------- #
-
-# Domain name / IP
-FQDN="${FQDN:-localhost}"
-
-# Default MySQL credentials
-MYSQL_DB="${MYSQL_DB:-panel}"
-MYSQL_USER="${MYSQL_USER:-pterodactyl}"
-MYSQL_PASSWORD="${MYSQL_PASSWORD:-$(gen_passwd 64)}"
-
-# Environment
-timezone="${timezone:-Europe/Stockholm}"
-
-# Assume SSL, will fetch different config if true
-ASSUME_SSL="${ASSUME_SSL:-false}"
-CONFIGURE_LETSENCRYPT="${CONFIGURE_LETSENCRYPT:-false}"
-
-# Firewall
-CONFIGURE_FIREWALL="${CONFIGURE_FIREWALL:-false}"
-
-# Must be assigned to work, no default values
-email="${email:-}"
-user_email="${user_email:-}"
-user_username="${user_username:-}"
-user_firstname="${user_firstname:-}"
-user_lastname="${user_lastname:-}"
-user_password="${user_password:-}"
-
-missing=()
-
-for var in email user_email user_username user_firstname user_lastname user_password; do
-  if [[ -z "${!var}" ]]; then
-    missing+=("$var")
-  fi
-done
-
-if (( ${#missing[@]} > 0 )); then
-  for m in "${missing[@]}"; do
-    error "${m} is required"
-  done
-  exit 1
-fi
-
-
-# --------- Main installation functions -------- #
-
-install_composer() {
-  output "Installing composer.."
-  curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
-  success "Composer installed!"
-}
-
-ptdl_dl() {
-  output "Downloading pterodactyl panel files .. "
-  mkdir -p /var/www/pterodactyl
-  cd /var/www/pterodactyl || exit
-
-  curl -Lo panel.tar.gz "$PANEL_DL_URL"
-  tar -xzvf panel.tar.gz
-  chmod -R 755 storage/* bootstrap/cache/
-
-  cp .env.example .env
-
-  success "Downloaded pterodactyl panel files!"
-}
-
-install_composer_deps() {
-  output "Installing composer dependencies.."
-  [ "$OS" == "rocky" ] || [ "$OS" == "almalinux" ] && export PATH=/usr/local/bin:$PATH
-  COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader
-  success "Installed composer dependencies!"
-}
-
-# Configure environment
-configure() {
-  output "Configuring environment.."
-
-  local app_url="http://$FQDN"
-  [ "$ASSUME_SSL" == true ] && app_url="https://$FQDN"
-  [ "$CONFIGURE_LETSENCRYPT" == true ] && app_url="https://$FQDN"
-
-  # Generate encryption key
-  php artisan key:generate --force
-
-  # Fill in environment:setup automatically
-  php artisan p:environment:setup \
-    --author="$email" \
-    --url="$app_url" \
-    --timezone="$timezone" \
-    --cache="redis" \
-    --session="redis" \
-    --queue="redis" \
-    --redis-host="localhost" \
-    --redis-pass="null" \
-    --redis-port="6379" \
-    --settings-ui=true
-
-  # Fill in environment:database credentials automatically
-  php artisan p:environment:database \
-    --host="127.0.0.1" \
-    --port="3306" \
-    --database="$MYSQL_DB" \
-    --username="$MYSQL_USER" \
-    --password="$MYSQL_PASSWORD"
-
-  # configures database
-  php artisan migrate --seed --force
-
-  # Create user account
-  php artisan p:user:make \
-    --email="$user_email" \
-    --username="$user_username" \
-    --name-first="$user_firstname" \
-    --name-last="$user_lastname" \
-    --password="$user_password" \
-    --admin=1
-
-  success "Configured environment!"
-}
-
-# set the correct folder permissions depending on OS and webserver
-set_folder_permissions() {
-  # if os is ubuntu or debian, we do this
-  case "$OS" in
-  debian | ubuntu)
-    chown -R www-data:www-data ./*
-    ;;
-  rocky | almalinux)
-    chown -R nginx:nginx ./*
-    ;;
-  esac
-}
-
-insert_cronjob() {
-  output "Installing cronjob.. "
-
-  crontab -l | {
-    cat
-    output "* * * * php /var/www/pterodactyl/artisan schedule:run >> /dev/null 2>&1"
-  } | crontab -
-
-  success "Cronjob installed!"
-}
-
-install_pteroq() {
-  output "Installing pteroq service.."
-
-  curl -o /etc/systemd/system/pteroq.service "$GITHUB_URL"/configs/pteroq.service
-
-  case "$OS" in
-  debian | ubuntu)
-    sed -i -e "s@<user>@www-data@g" /etc/systemd/system/pteroq.service
-    ;;
-  rocky | almalinux)
-    sed -i -e "s@<user>@nginx@g" /etc/systemd/system/pteroq.service
-    ;;
-  esac
-
-  systemctl enable pteroq.service
-  systemctl start pteroq
-
-  success "Installed pteroq!"
-}
-
-# -------- OS specific install functions ------- #
-
-enable_services() {
-  case "$OS" in
-  ubuntu | debian)
-    systemctl enable redis-server
-    systemctl start redis-server
-    ;;
-  rocky | almalinux)
-    systemctl enable redis
-    systemctl start redis
-    ;;
-  esac
-  systemctl enable nginx
-  systemctl enable mariadb
-  systemctl start mariadb
-}
-
-selinux_allow() {
-  setsebool -P httpd_can_network_connect 1 || true # these commands can fail OK
-  setsebool -P httpd_execmem 1 || true
-  setsebool -P httpd_unified 1 || true
-}
-
-php_fpm_conf() {
-  curl -o /etc/php-fpm.d/www-pterodactyl.conf "$GITHUB_URL"/configs/www-pterodactyl.conf
-
-  systemctl enable php-fpm
-  systemctl start php-fpm
-}
-
-ubuntu_dep() {
-  # Install deps for adding repos
-  install_packages "software-properties-common apt-transport-https ca-certificates gnupg"
-
-  # Add Ubuntu universe repo
-  add-apt-repository universe -y
-
-  # Add PPA for PHP (we need 8.3)
-  LC_ALL=C.UTF-8 add-apt-repository -y ppa:ondrej/php
-}
-
-debian_dep() {
-  # Install deps for adding repos
-  install_packages "dirmngr ca-certificates apt-transport-https lsb-release"
-
-  # Install PHP 8.3 using sury's repo
-  curl -o /etc/apt/trusted.gpg.d/php.gpg https://packages.sury.org/php/apt.gpg
-  echo "deb https://packages.sury.org/php/ $(lsb_release -sc) main" | tee /etc/apt/sources.list.d/php.list
-}
-
-alma_rocky_dep() {
-  # SELinux tools
-  install_packages "policycoreutils selinux-policy selinux-policy-targeted \
-    setroubleshoot-server setools setools-console mcstrans"
-
-  # add remi repo (php8.3)
-  install_packages "epel-release http://rpms.remirepo.net/enterprise/remi-release-$OS_VER_MAJOR.rpm"
-  dnf module enable -y php:remi-8.3
-}
-
-dep_install() {
-  output "Installing dependencies for $OS $OS_VER..."
-
-  # Update repos before installing
-  update_repos
-
-  [ "$CONFIGURE_FIREWALL" == true ] && install_firewall && firewall_ports
-
-  case "$OS" in
-  ubuntu | debian)
-    [ "$OS" == "ubuntu" ] && ubuntu_dep
-    [ "$OS" == "debian" ] && debian_dep
-
-    update_repos
-
-    # Install dependencies
-    install_packages "php8.3 php8.3-{cli,common,gd,mysql,mbstring,bcmath,xml,fpm,curl,zip} \
-      mariadb-common mariadb-server mariadb-client \
-      nginx \
-      redis-server \
-      zip unzip tar \
-      git cron"
-
-    [ "$CONFIGURE_LETSENCRYPT" == true ] && install_packages "certbot python3-certbot-nginx"
-
-    ;;
-  rocky | almalinux)
-    alma_rocky_dep
-
-    # Install dependencies
-    install_packages "php php-{common,fpm,cli,json,mysqlnd,mcrypt,gd,mbstring,pdo,zip,bcmath,dom,opcache,posix} \
-      mariadb mariadb-server \
-      nginx \
-      redis \
-      zip unzip tar \
-      git cronie"
-
-    [ "$CONFIGURE_LETSENCRYPT" == true ] && install_packages "certbot python3-certbot-nginx"
-
-    # Allow nginx
-    selinux_allow
-
-    # Create config for php fpm
-    php_fpm_conf
-    ;;
-  esac
-
-  enable_services
-
-  success "Dependencies installed!"
-}
-
-# --------------- Other functions -------------- #
-
-firewall_ports() {
-  output "Opening ports: 22 (SSH), 80 (HTTP) and 443 (HTTPS)"
-
-  firewall_allow_ports "22 80 443"
-
-  success "Firewall ports opened!"
-}
-
-letsencrypt() {
-  FAILED=false
-
-  output "Configuring Let's Encrypt..."
-
-  # Obtain certificate
-  certbot --nginx --redirect --no-eff-email --email "$email" -d "$FQDN" || FAILED=true
-
-  # Check if it succeded
-  if [ ! -d "/etc/letsencrypt/live/$FQDN/" ] || [ "$FAILED" == true ]; then
-    warning "The process of obtaining a Let's Encrypt certificate failed!"
-    echo -n "* Still assume SSL? (y/N): "
-    read -r CONFIGURE_SSL
-
-    if [[ "$CONFIGURE_SSL" =~ [Yy] ]]; then
-      ASSUME_SSL=true
-      CONFIGURE_LETSENCRYPT=false
-      configure_nginx
-    else
-      ASSUME_SSL=false
-      CONFIGURE_LETSENCRYPT=false
+# GO Game - Auto Public Dashboard
+# Autor: Kacpros
+# Wersja: 10.0 - Auto Public IP + Open Ports
+
+# Kolory
+BLUE='\033[0;34m'
+GREEN='\033[0;32m'
+ORANGE='\033[0;33m'
+RED='\033[0;31m'
+NC='\033[0m'
+
+print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+print_warning() { echo -e "${ORANGE}[WARNING]${NC} $1"; }
+print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Pobierz PUBLICZNY adres IP
+get_public_ip() {
+    print_info "Pobieranie publicznego adresu IP..."
+    
+    # Próbuj różne serwisy
+    local ip=$(curl -s --max-time 5 https://ifconfig.me/ip 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 5 https://api.ipify.org 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 5 https://checkip.amazonaws.com 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 5 https://icanhazip.com 2>/dev/null)
+    [ -z "$ip" ] && ip=$(curl -s --max-time 5 https://ipecho.net/plain 2>/dev/null)
+    
+    # Jeśli nie udało się pobrać publicznego IP, użyj lokalnego
+    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+        print_warning "Nie udało się pobrać publicznego IP, używam lokalnego..."
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+        [ -z "$ip" ] && ip=$(ip addr show 2>/dev/null | grep -oP 'inet \K[\d.]+' | grep -v '127.0.0.1' | head -1)
+        [ -z "$ip" ] && ip="localhost"
     fi
-  else
-    success "The process of obtaining a Let's Encrypt certificate succeeded!"
-  fi
+    
+    echo "$ip"
 }
 
-# ------ Webserver configuration functions ----- #
-
-configure_nginx() {
-  output "Configuring nginx .."
-
-  if [ "$ASSUME_SSL" == true ] && [ "$CONFIGURE_LETSENCRYPT" == false ]; then
-    DL_FILE="nginx_ssl.conf"
-  else
-    DL_FILE="nginx.conf"
-  fi
-
-  case "$OS" in
-  ubuntu | debian)
-    PHP_SOCKET="/run/php/php8.3-fpm.sock"
-    CONFIG_PATH_AVAIL="/etc/nginx/sites-available"
-    CONFIG_PATH_ENABL="/etc/nginx/sites-enabled"
-    ;;
-  rocky | almalinux)
-    PHP_SOCKET="/var/run/php-fpm/pterodactyl.sock"
-    CONFIG_PATH_AVAIL="/etc/nginx/conf.d"
-    CONFIG_PATH_ENABL="$CONFIG_PATH_AVAIL"
-    ;;
-  esac
-
-  rm -rf "$CONFIG_PATH_ENABL"/default
-
-  curl -o "$CONFIG_PATH_AVAIL"/pterodactyl.conf "$GITHUB_URL"/configs/$DL_FILE
-
-  sed -i -e "s@<domain>@${FQDN}@g" "$CONFIG_PATH_AVAIL"/pterodactyl.conf
-
-  sed -i -e "s@<php_socket>@${PHP_SOCKET}@g" "$CONFIG_PATH_AVAIL"/pterodactyl.conf
-
-  case "$OS" in
-  ubuntu | debian)
-    ln -sf "$CONFIG_PATH_AVAIL"/pterodactyl.conf "$CONFIG_PATH_ENABL"/pterodactyl.conf
-    ;;
-  esac
-
-  if [ "$ASSUME_SSL" == false ] && [ "$CONFIGURE_LETSENCRYPT" == false ]; then
-    systemctl restart nginx
-  fi
-
-  success "Nginx configured!"
+# Otwórz porty w firewall
+open_ports() {
+    local ports=("$@")
+    
+    print_info "Konfiguracja firewalla..."
+    
+    # Sprawdź dostępne narzędzia firewall
+    if command -v ufw >/dev/null 2>&1; then
+        # UFW (Ubuntu/Debian)
+        for port in "${ports[@]}"; do
+            if ! ufw status | grep -q "$port/tcp"; then
+                print_info "Otwieram port $port w UFW..."
+                ufw allow "$port/tcp" >/dev/null 2>&1
+            fi
+        done
+        ufw --force enable >/dev/null 2>&1
+        
+    elif command -v firewall-cmd >/dev/null 2>&1; then
+        # firewalld (CentOS/RHEL)
+        for port in "${ports[@]}"; do
+            if ! firewall-cmd --list-ports | grep -q "$port/tcp"; then
+                print_info "Otwieram port $port w firewalld..."
+                firewall-cmd --permanent --add-port="$port/tcp" >/dev/null 2>&1
+            fi
+        done
+        firewall-cmd --reload >/dev/null 2>&1
+        
+    elif command -v iptables >/dev/null 2>&1; then
+        # iptables (ogólny Linux)
+        for port in "${ports[@]}"; do
+            print_info "Otwieram port $port w iptables..."
+            iptables -A INPUT -p tcp --dport "$port" -j ACCEPT >/dev/null 2>&1
+        done
+        
+    else
+        print_warning "Nie znaleziono narzędzia firewall, pomijam konfigurację portów"
+    fi
 }
 
-# --------------- Main functions --------------- #
-
-perform_install() {
-  output "Starting installation.. this might take a while!"
-  dep_install
-  install_composer
-  ptdl_dl
-  install_composer_deps
-  create_db_user "$MYSQL_USER" "$MYSQL_PASSWORD"
-  create_db "$MYSQL_DB" "$MYSQL_USER"
-  configure
-  set_folder_permissions
-  insert_cronjob
-  install_pteroq
-  configure_nginx
-  [ "$CONFIGURE_LETSENCRYPT" == true ] && letsencrypt
-
-  return 0
+# Sprawdź czy port jest dostępny z zewnątrz
+test_port_public() {
+    local ip=$1
+    local port=$2
+    
+    # Prosty test używając telnet/tmp
+    if command -v nc >/dev/null 2>&1; then
+        timeout 5 bash -c "echo > /dev/tcp/$ip/$port" 2>/dev/null
+        return $?
+    fi
+    return 0
 }
 
-# ------------------- Install ------------------ #
+# Główna instalacja
+install_go_game() {
+    clear
+    echo -e "${BLUE}"
+    echo "╔══════════════════════════════════════════════╗"
+    echo "║           GO GAME - PUBLIC DASHBOARD        ║"
+    echo "║           Auto Public IP + Open Ports       ║"
+    echo "╚══════════════════════════════════════════════╝"
+    echo -e "${NC}"
+    
+    # Ustawienie portów
+    FRONTEND_PORT=19210
+    BACKEND_PORT=19211
+    DB_PORT=19212
+    REDIS_PORT=19213
+    
+    # Pobierz PUBLICZNY adres IP
+    print_info "Wykrywanie adresu IP..."
+    SERVER_IP=$(get_public_ip)
+    
+    print_success "Adres serwera: $SERVER_IP"
+    print_info "Konfiguracja portów:"
+    print_info "Frontend port: $FRONTEND_PORT"
+    print_info "Backend port: $BACKEND_PORT"
+    print_info "Database port: $DB_PORT"
+    print_info "Redis port: $REDIS_PORT"
+    
+    # Otwórz porty w firewall
+    PORTS=($FRONTEND_PORT $BACKEND_PORT $DB_PORT $REDIS_PORT)
+    open_ports "${PORTS[@]}"
+    
+    # 1. Instalacja Docker
+    if ! command -v docker &> /dev/null; then
+        print_info "Instalacja Docker..."
+        curl -fsSL https://get.docker.com -o get-docker.sh
+        sh get-docker.sh
+        rm get-docker.sh
+    fi
+    
+    systemctl start docker
+    systemctl enable docker
+    
+    # 2. Instalacja docker-compose
+    if ! command -v docker-compose &> /dev/null; then
+        print_info "Instalacja Docker Compose..."
+        curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+        chmod +x /usr/local/bin/docker-compose
+    fi
+    
+    # 3. Tworzenie struktury
+    print_info "Tworzenie struktury projektu..."
+    rm -rf go-game-public
+    mkdir -p go-game-public/{frontend,backend,database,scripts,logs,nginx}
+    
+    # 4. docker-compose.yml
+    print_info "Konfiguracja Docker Compose..."
+    cat > go-game-public/docker-compose.yml << EOF
+version: '3.8'
+services:
+  frontend:
+    image: node:18-alpine
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - ./logs/frontend:/app/logs
+    ports:
+      - "0.0.0.0:$FRONTEND_PORT:8080"
+    command: sh -c "npm install && node server.js"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-perform_install
+  backend:
+    image: node:18-alpine  
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./logs/backend:/app/logs
+    ports:
+      - "0.0.0.0:$BACKEND_PORT:3001"
+    command: sh -c "npm install && node server.js"
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=gogame
+      - POSTGRES_USER=gogame
+      - POSTGRES_PASSWORD=gogame123
+    ports:
+      - "0.0.0.0:$DB_PORT:5432"
+    volumes:
+      - ./database/postgres:/var/lib/postgresql/data
+      - ./logs/postgres:/var/log/postgresql
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gogame -d gogame"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "0.0.0.0:$REDIS_PORT:6379"
+    volumes:
+      - ./database/redis:/data
+      - ./logs/redis:/var/log/redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --bind 0.0.0.0
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "0.0.0.0:80:80"
+      - "0.0.0.0:443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - frontend
+      - backend
+    restart: unless-stopped
+EOF
+
+    # 5. Frontend z PUBLICZNYM IP
+    print_info "Tworzenie frontendu z publicznym dostępem..."
+    
+    cat > go-game-public/frontend/package.json << 'EOF'
+{
+  "name": "go-game-frontend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "axios": "^1.3.0"
+  }
+}
+EOF
+
+    cat > go-game-public/frontend/server.js << EOF
+const express = require('express');
+const cors = require('cors');
+const app = express();
+const PORT = 8080;
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static('public'));
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    service: 'frontend', 
+    port: PORT,
+    public_url: 'http://$SERVER_IP:$FRONTEND_PORT',
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.get('/', (req, res) => {
+  res.send(`
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GO Game - Public Platform</title>
+    <style>
+        * { 
+            margin: 0; 
+            padding: 0; 
+            box-sizing: border-box; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body { 
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            background: rgba(15, 52, 96, 0.9);
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            margin-bottom: 2rem;
+            border: 2px solid #e94560;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+        }
+        
+        .logo {
+            font-size: 3rem;
+            font-weight: bold;
+            color: #e94560;
+            margin-bottom: 1rem;
+        }
+        
+        .public-badge {
+            background: #48bb78;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 25px;
+            font-weight: bold;
+            font-size: 1.1rem;
+            display: inline-block;
+            margin: 0.5rem 0;
+        }
+        
+        .url-display {
+            background: rgba(0,0,0,0.3);
+            padding: 1.5rem;
+            border-radius: 10px;
+            margin: 1rem 0;
+            font-family: 'Courier New', monospace;
+            border: 2px solid #48bb78;
+            font-size: 1.2rem;
+            text-align: center;
+            word-break: break-all;
+        }
+        
+        .btn {
+            background: #e94560;
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin: 0.5rem;
+            transition: all 0.3s ease;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background: #d63a54;
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(229, 69, 96, 0.4);
+        }
+        
+        .btn-success {
+            background: #48bb78;
+        }
+        
+        .btn-success:hover {
+            background: #38a169;
+        }
+        
+        .info-panel {
+            background: rgba(15, 52, 96, 0.8);
+            padding: 2rem;
+            border-radius: 15px;
+            margin: 2rem 0;
+            border-left: 5px solid #e94560;
+        }
+        
+        .games-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+        
+        .game-card {
+            background: rgba(45, 55, 72, 0.9);
+            padding: 1.5rem;
+            border-radius: 10px;
+            border: 1px solid #4a5568;
+            transition: all 0.3s ease;
+        }
+        
+        .game-card:hover {
+            transform: translateY(-5px);
+            border-color: #e94560;
+            box-shadow: 0 10px 25px rgba(229, 69, 96, 0.2);
+        }
+        
+        .game-title {
+            color: #e94560;
+            font-size: 1.3rem;
+            margin-bottom: 1rem;
+            font-weight: bold;
+        }
+        
+        .game-price {
+            font-size: 1.5rem;
+            color: #48bb78;
+            font-weight: bold;
+            margin: 1rem 0;
+        }
+        
+        .access-info {
+            background: linear-gradient(135deg, #2d3748 0%, #4a5568 100%);
+            padding: 2rem;
+            border-radius: 15px;
+            margin: 2rem 0;
+            border: 2px solid #e94560;
+        }
+        
+        .status-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.8rem 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .status-item:last-child {
+            border-bottom: none;
+        }
+        
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            .header {
+                padding: 1.5rem;
+            }
+            
+            .logo {
+                font-size: 2rem;
+            }
+            
+            .url-display {
+                font-size: 1rem;
+                padding: 1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo">🎮 GO GAME PUBLIC</div>
+            <div class="public-badge">🌐 PUBLICZNY DOSTĘP</div>
+            <p>Platforma dostępna z całego świata</p>
+        </div>
+
+        <!-- Public URL -->
+        <div class="info-panel">
+            <h2>🌍 Publiczny Adres Platformy</h2>
+            <div class="url-display">
+                http://$SERVER_IP:$FRONTEND_PORT
+            </div>
+            <p style="text-align: center; margin-top: 1rem;">
+                <strong>Ten adres działa z każdego miejsca na świecie!</strong>
+            </p>
+            <div style="text-align: center; margin-top: 1rem;">
+                <button class="btn btn-success" onclick="copyUrl()">📋 Kopiuj Adres</button>
+                <button class="btn" onclick="testAccess()">🚀 Testuj Dostęp</button>
+                <button class="btn" onclick="openInNewTab()">🔗 Otwórz Teraz</button>
+            </div>
+        </div>
+
+        <!-- Access Information -->
+        <div class="access-info">
+            <h2>📡 Informacje o Dostępie</h2>
+            <div class="status-item">
+                <span>Publiczny adres:</span>
+                <strong>http://$SERVER_IP:$FRONTEND_PORT</strong>
+            </div>
+            <div class="status-item">
+                <span>Status portu:</span>
+                <strong style="color: #48bb78;">🟢 OTWARTY</strong>
+            </div>
+            <div class="status-item">
+                <span>Dostęp z:</span>
+                <strong>🌍 Cały świat</strong>
+            </div>
+            <div class="status-item">
+                <span>Port frontend:</span>
+                <strong>$FRONTEND_PORT</strong>
+            </div>
+            <div class="status-item">
+                <span>Port backend:</span>
+                <strong>$BACKEND_PORT</strong>
+            </div>
+            <div class="status-item">
+                <span>Admin panel:</span>
+                <strong>kacpros</strong>
+            </div>
+        </div>
+
+        <!-- Admin Panel -->
+        <div class="info-panel">
+            <h2>👑 Panel Administratora</h2>
+            <div style="background: rgba(0,0,0,0.3); padding: 1.5rem; border-radius: 10px; margin: 1rem 0;">
+                <strong>Użytkownik:</strong> kacpros<br>
+                <strong>Rola:</strong> Właściciel<br>
+                <strong>Publiczny URL:</strong> http://$SERVER_IP:$FRONTEND_PORT<br>
+                <strong>Data uruchomienia:</strong> <span id="start-time"></span>
+            </div>
+            <button class="btn" onclick="showAdminPanel()">Otwórz Panel Admina</button>
+        </div>
+
+        <!-- Games -->
+        <h2>🎮 Dostępne Gry</h2>
+        <div class="games-grid">
+            <div class="game-card">
+                <div class="game-title">Cyber Revolution 2077</div>
+                <p>Immersywna gra RPG w cyberpunkowym świecie przyszłości.</p>
+                <div class="game-price">59.99 PLN</div>
+                <button class="btn" onclick="addToCart('Cyber Revolution 2077')">Dodaj do Koszyka</button>
+            </div>
+            
+            <div class="game-card">
+                <div class="game-title">Forest Adventures</div>
+                <p>Przygodowa gra eksploracyjna w magicznym lesie.</p>
+                <div class="game-price">39.99 PLN</div>
+                <button class="btn" onclick="addToCart('Forest Adventures')">Dodaj do Koszyka</button>
+            </div>
+            
+            <div class="game-card">
+                <div class="game-title">Space Command</div>
+                <p>Kosmiczna gra strategiczna z epickimi bitwami.</p>
+                <div class="game-price">49.99 PLN</div>
+                <button class="btn" onclick="addToCart('Space Command')">Dodaj do Koszyka</button>
+            </div>
+        </div>
+
+        <!-- Quick Access -->
+        <div style="text-align: center; margin: 3rem 0;">
+            <h2>⚡ Szybki Dostęp</h2>
+            <button class="btn btn-success" style="padding: 1.2rem 2.5rem; font-size: 1.2rem;" onclick="openInNewTab()">
+                🌐 Otwórz Platformę
+            </button>
+            <p style="margin-top: 1rem; color: #cbd5e0;">
+                Adres: http://$SERVER_IP:$FRONTEND_PORT
+            </p>
+        </div>
+    </div>
+
+    <script>
+        // Ustaw czas startu
+        document.getElementById('start-time').textContent = new Date().toLocaleString();
+        
+        function copyUrl() {
+            const url = 'http://$SERVER_IP:$FRONTEND_PORT';
+            navigator.clipboard.writeText(url).then(() => {
+                alert('✅ Adres skopiowany do schowka!\\n' + url);
+            });
+        }
+        
+        function openInNewTab() {
+            const url = 'http://$SERVER_IP:$FRONTEND_PORT';
+            window.open(url, '_blank');
+        }
+        
+        function testAccess() {
+            const url = 'http://$SERVER_IP:$FRONTEND_PORT/health';
+            fetch(url)
+                .then(response => response.json())
+                .then(data => {
+                    alert('✅ Test dostępu udany!\\nPlatforma jest publicznie dostępna.\\n\\nPubliczny URL:\\nhttp://$SERVER_IP:$FRONTEND_PORT');
+                })
+                .catch(error => {
+                    alert('⚠️ Problem z dostępem publicznym.\\nSprawdź konfigurację sieci.\\nBłąd: ' + error.message);
+                });
+        }
+        
+        function showAdminPanel() {
+            const adminInfo = 
+                '👑 Publiczny Panel Administratora\\n\\n' +
+                'Użytkownik: kacpros\\n' +
+                'Rola: Właściciel\\n' +
+                'Publiczny URL: http://$SERVER_IP:$FRONTEND_PORT\\n' +
+                'Porty: $FRONTEND_PORT (front), $BACKEND_PORT (back)\\n\\n' +
+                'Platforma jest publicznie dostępna! 🌍';
+                
+            alert(adminInfo);
+        }
+        
+        function addToCart(gameName) {
+            alert('🛒 Dodano do koszyka: ' + gameName + '\\n\\nPlatforma publicznie dostępna!');
+        }
+        
+        // Logowanie informacji
+        console.log('🎮 GO Game Public Platform');
+        console.log('🌍 Public URL: http://$SERVER_IP:$FRONTEND_PORT');
+        console.log('🔧 Backend: http://$SERVER_IP:$BACKEND_PORT');
+        console.log('👑 Admin: kacpros');
+        console.log('🚀 Platforma publicznie dostępna!');
+        
+        // Automatyczny test dostępu przy starcie
+        setTimeout(testAccess, 1000);
+        
+        // Pokaż powitanie
+        setTimeout(() => {
+            alert('🌍 GO GAME PUBLIC PLATFORM\\n\\n' +
+                  'Platforma jest teraz publicznie dostępna!\\n' +
+                  'Adres: http://$SERVER_IP:$FRONTEND_PORT\\n\\n' +
+                  'Możesz udostępnić ten adres innym użytkownikom.');
+        }, 500);
+    </script>
+</body>
+</html>
+  `);
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('=========================================');
+  console.log('🎮 GO GAME PUBLIC PLATFORM');
+  console.log('=========================================');
+  console.log('🌍 Public URL: http://$SERVER_IP:$FRONTEND_PORT');
+  console.log('🔧 Backend:    http://$SERVER_IP:$BACKEND_PORT');
+  console.log('🗄️  Database:   $SERVER_IP:$DB_PORT');
+  console.log('👑 Admin:      kacpros');
+  console.log('🚀 Status:     Publicznie dostępna!');
+  console.log('=========================================');
+});
+EOF
+
+    # 6. Backend
+    print_info "Tworzenie backendu z publicznym dostępem..."
+    
+    cat > go-game-public/backend/package.json << 'EOF'
+{
+  "name": "go-game-backend",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.0",
+    "cors": "^2.8.5",
+    "pg": "^8.8.0",
+    "redis": "^4.6.4"
+  }
+}
+EOF
+
+    cat > go-game-public/backend/server.js << EOF
+const express = require('express');
+const cors = require('cors');
+const app = express();
+const PORT = 3001;
+
+app.use(cors());
+app.use(express.json());
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy',
+    service: 'go-game-backend',
+    port: PORT,
+    public_url: 'http://$SERVER_IP:$BACKEND_PORT',
+    server_ip: '$SERVER_IP',
+    timestamp: new Date().toISOString(),
+    access: 'public'
+  });
+});
+
+// Public API Games
+app.get('/api/games', (req, res) => {
+  res.json([
+    {
+      id: 1,
+      title: "Cyber Revolution 2077",
+      price: 59.99,
+      description: "Immersywna gra RPG w cyberpunkowym świecie przyszłości",
+      image: "/images/cyber-revolution.jpg",
+      rating: 4.8,
+      public: true
+    },
+    {
+      id: 2, 
+      title: "Forest Adventures",
+      price: 39.99,
+      description: "Przygodowa gra eksploracyjna w magicznym lesie",
+      image: "/images/forest-adventures.jpg",
+      rating: 4.5,
+      public: true
+    },
+    {
+      id: 3,
+      title: "Space Command", 
+      price: 49.99,
+      description: "Kosmiczna gra strategiczna z epickimi bitwami",
+      image: "/images/space-command.jpg",
+      rating: 4.7,
+      public: true
+    }
+  ]);
+});
+
+// Public user info
+app.get('/api/user/:discordId', (req, res) => {
+  const { discordId } = req.params;
+  
+  if (discordId === 'kacpros') {
+    res.json({
+      username: 'kacpros',
+      role: 'owner',
+      permissions: ['all'],
+      public_access: true,
+      server_info: {
+        public_ip: '$SERVER_IP',
+        frontend_port: $FRONTEND_PORT,
+        backend_port: $BACKEND_PORT,
+        status: 'public'
+      }
+    });
+  } else {
+    res.json({
+      username: discordId,
+      role: 'user', 
+      permissions: ['basic'],
+      public_access: true,
+      joinDate: new Date().toISOString().split('T')[0]
+    });
+  }
+});
+
+// Public admin stats
+app.get('/api/admin/public-stats', (req, res) => {
+  res.json({
+    platform: 'GO Game Public Platform',
+    version: '10.0',
+    status: 'public',
+    public_url: 'http://$SERVER_IP:$FRONTEND_PORT',
+    ports: {
+      frontend: $FRONTEND_PORT,
+      backend: $BACKEND_PORT,
+      database: $DB_PORT,
+      redis: $REDIS_PORT
+    },
+    server: {
+      ip: '$SERVER_IP',
+      access: 'public'
+    },
+    admin: 'kacpros',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
+  });
+});
+
+app.listen(PORT, '0.0.0.0', () => {
+  console.log('=========================================');
+  console.log('🔧 GO GAME PUBLIC BACKEND');
+  console.log('=========================================');
+  console.log('🌍 Public URL: http://$SERVER_IP:$BACKEND_PORT');
+  console.log('👑 Admin: kacpros');
+  console.log('✅ Backend publicznie dostępny!');
+  console.log('=========================================');
+});
+EOF
+
+    # 7. Konfiguracja Nginx dla publicznego dostępu
+    cat > go-game-public/nginx/nginx.conf << 'EOF'
+events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # Basic Settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    # Logging
+    access_log /var/log/nginx/access.log;
+    error_log /var/log/nginx/error.log;
+
+    # Gzip Settings
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    # Upstreams
+    upstream frontend {
+        server frontend:8080;
+        keepalive 32;
+    }
+
+    upstream backend {
+        server backend:3001;
+        keepalive 32;
+    }
+
+    # Public HTTP Server
+    server {
+        listen 80;
+        listen [::]:80;
+        server_name _;
+        
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
+
+        # Frontend
+        location / {
+            proxy_pass http://frontend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+            proxy_connect_timeout 60s;
+            proxy_send_timeout 60s;
+            proxy_read_timeout 60s;
+        }
+
+        # Backend API
+        location /api/ {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+        }
+
+        # WebSocket support
+        location /ws/ {
+            proxy_pass http://backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection "upgrade";
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_read_timeout 86400;
+        }
+
+        # Health checks
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+    }
+}
+EOF
+
+    # 8. Skrypty zarządzania
+    print_info "Tworzenie skryptów zarządzania..."
+    
+    cat > go-game-public/start.sh << EOF
+#!/bin/bash
+echo "🚀 Uruchamianie GO Game Public Platform..."
+echo ""
+
+# Sprawdź czy Docker działa
+if ! docker info > /dev/null 2>&1; then
+    echo "❌ Docker nie jest uruchomiony!"
+    echo "   Uruchom: sudo systemctl start docker"
+    exit 1
+fi
+
+cd go-game-public
+
+echo "📦 Uruchamianie kontenerów Docker..."
+docker-compose up -d
+
+echo ""
+echo "⏳ Oczekiwanie na uruchomienie usług..."
+sleep 15
+
+# Sprawdź status
+echo ""
+echo "📊 Status usług:"
+docker-compose ps
+
+# Test publicznego dostępu
+echo ""
+echo "🔍 Testowanie publicznego dostępu..."
+curl -s --max-time 10 "http://localhost:$FRONTEND_PORT/health" > /dev/null && \
+echo "✅ Frontend działa poprawnie" || echo "⚠️ Frontend może mieć problemy"
+
+curl -s --max-time 10 "http://localhost:$BACKEND_PORT/health" > /dev/null && \
+echo "✅ Backend działa poprawnie" || echo "⚠️ Backend może mieć problemy"
+
+echo ""
+echo "==========================================="
+echo "🎮 GO GAME PUBLIC PLATFORM - URUCHOMIONA!"
+echo "==========================================="
+echo "🌍 Publiczny URL: http://$SERVER_IP:$FRONTEND_PORT"
+echo "🔧 Backend API:   http://$SERVER_IP:$BACKEND_PORT"
+echo "🗄️  Database:      $SERVER_IP:$DB_PORT"
+echo "👑 Admin:         kacpros"
+echo "==========================================="
+echo ""
+echo "💡 Platforma jest teraz PUBLICZNIE DOSTĘPNA!"
+echo "   Możesz udostępnić ten adres:"
+echo "   http://$SERVER_IP:$FRONTEND_PORT"
+echo ""
+echo "🔧 Zarządzanie:"
+echo "   • Sprawdź status: ./status.sh"
+echo "   • Zobacz logi: ./logs.sh"
+echo "   • Zatrzymaj: ./stop.sh"
+echo ""
+EOF
+
+    cat > go-game-public/stop.sh << 'EOF'
+#!/bin/bash
+echo "🛑 Zatrzymywanie GO Game Public Platform..."
+cd go-game-public
+docker-compose down
+echo "✅ Platforma zatrzymana!"
+EOF
+
+    cat > go-game-public/restart.sh << 'EOF'
+#!/bin/bash
+echo "🔁 Restartowanie GO Game Public Platform..."
+cd go-game-public
+docker-compose restart
+echo "✅ Platforma zrestartowana!"
+EOF
+
+    cat > go-game-public/logs.sh << 'EOF'
+#!/bin/bash
+echo "📋 Logi GO Game Public Platform:"
+cd go-game-public
+docker-compose logs -f
+EOF
+
+    cat > go-game-public/status.sh << EOF
+#!/bin/bash
+echo "📊 Status GO Game Public Platform:"
+cd go-game-public
+docker-compose ps
+
+echo ""
+echo "🌍 Publiczne Adresy Dostępu:"
+echo "   Frontend:  http://$SERVER_IP:$FRONTEND_PORT"
+echo "   Backend:   http://$SERVER_IP:$BACKEND_PORT"
+echo "   Database:  $SERVER_IP:$DB_PORT"
+echo "   Redis:     $SERVER_IP:$REDIS_PORT"
+echo "   HTTP:      http://$SERVER_IP:80"
+echo ""
+echo "👑 Administrator: kacpros"
+echo "🏠 Serwer: $SERVER_IP"
+echo "🔧 Porty: $FRONTEND_PORT, $BACKEND_PORT, $DB_PORT, $REDIS_PORT"
+echo ""
+echo "💡 Platforma jest PUBLICZNIE DOSTĘPNA!"
+echo "   Udostępnij: http://$SERVER_IP:$FRONTEND_PORT"
+EOF
+
+    # Nadawanie uprawnień
+    chmod +x go-game-public/*.sh
+
+    print_success "✅ GO Game Public Platform gotowa!"
+    echo ""
+    echo "📁 Projekt: ./go-game-public/"
+    echo ""
+    echo "🚀 Uruchomienie:"
+    echo "   ./go-game-public/start.sh"
+    echo ""
+    echo "🌍 PUBLICZNY ADRES:"
+    echo "   http://$SERVER_IP:$FRONTEND_PORT"
+    echo ""
+    echo "🔧 Porty otwarte:"
+    echo "   • 19210 - Frontend (główna platforma)"
+    echo "   • 19211 - Backend (API)"
+    echo "   • 19212 - PostgreSQL (baza danych)"
+    echo "   • 19213 - Redis (cache)"
+    echo "   • 80    - HTTP (nginx)"
+    echo ""
+    print_success "💡 Platforma będzie PUBLICZNIE DOSTĘPNA z całego świata!"
+    echo ""
+    print_info "Następny krok: Uruchom './go-game-public/start.sh'"
+}
+
+# Uruchom instalację
+install_go_game
