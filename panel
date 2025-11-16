@@ -22,6 +22,7 @@ NC='\033[0m' # No Color
 
 # Clear the screen
 clear
+
 # Check if the script is run as root
 if [ "$EUID" -ne 0 ]; then
   echo -e "${RED}Please run this script as root.${NC}"
@@ -30,29 +31,35 @@ fi
 
 echo -e "${CYAN}$ascii_art${NC}"
 
-
-echo "* Installing Dependencies"
+echo -e "${YELLOW}* Installing Dependencies${NC}"
 
 # Update package list and install dependencies
-sudo apt update
-sudo apt install -y curl software-properties-common
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install nodejs -y 
-sudo apt install git -y
+apt update
+apt install -y curl software-properties-common
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs git
 
-echo_message "* Installed Dependencies"
+echo -e "${GREEN}* Installed Dependencies${NC}"
 
-echo_message "* Installing Files"
+echo -e "${YELLOW}* Installing Application${NC}"
 
 # Create directory, clone repository, and install files
+if [ -d "oversee-fixed" ]; then
+    echo -e "${BLUE}* Directory already exists, pulling latest changes${NC}"
+    cd oversee-fixed
+    git pull
+else
+    git clone https://github.com/draco-labes/oversee-fixed.git
+    cd oversee-fixed
+fi
 
-git clone https://github.com/draco-labes/oversee-fixed.git && cd oversee-fixed && npm install && npm run seed && npm run createUser && node . 
+npm install
+npm run seed
+npm run createUser
 
+echo -e "${GREEN}* Installation Complete${NC}"
+echo -e "${CYAN}* Starting Skyport on port 3001${NC}"
+echo -e "${YELLOW}* Wallet will only show 'buy coins' option${NC}"
 
-echo_message "* Installed Files"
-
-echo_message "* Starting Skyport"
-
-
-
-echo "* Skyport Installed and Started on Port 3001"
+# Start the application
+node .
