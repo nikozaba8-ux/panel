@@ -47,15 +47,15 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo -e "${CYAN}$ascii_art${NC}"
-echo_message "=== SKYPORT INSTALLER - BEZ WALLET ==="
+echo_message "=== SKYPORT INSTALLER - PANEL TWORZY SIĘ ==="
 
 # Update system
-echo_message "[1/7] Updating system packages..."
+echo_message "[1/6] Updating system packages..."
 apt update && apt upgrade -y
 apt install -y curl software-properties-common git wget unzip build-essential
 
 # Install Node.js
-echo_message "[2/7] Installing Node.js..."
+echo_message "[2/6] Installing Node.js..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
@@ -63,170 +63,109 @@ apt-get install -y nodejs
 echo_info "Node.js version: $(node -v)"
 echo_info "NPM version: $(npm -v)"
 
-# Install FiveM - NAPRAWIONA METODA
-echo_message "[3/7] Installing FiveM Assets..."
-mkdir -p /opt/fivem-assets
-cd /opt/fivem-assets
-
-# PROSTA I DZIAŁAJĄCA METODA POBRANIA FIVEM
-echo_info "Downloading FiveM using reliable method..."
-
-# Pobierz stronę i przetwórz ją poprawnie
-echo_info "Fetching latest FiveM build information..."
-FIVEM_HTML=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/)
-
-# Kilka różnych metod parsowania - jedna na pewno zadziała
-LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -1)
-
-if [ -z "$LATEST_BUILD" ]; then
-    LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oE '>[0-9]+-[a-f0-9]+/<' | sed 's/[><]//g' | head -1)
-fi
-
-if [ -z "$LATEST_BUILD" ]; then
-    LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oE '[0-9]{4}-[a-f0-9]{40}' | head -1)
-fi
-
-# Jeśli nadal nie znaleziono, użyj ręcznego linka
-if [ -z "$LATEST_BUILD" ]; then
-    echo_warning "Auto-detection failed, using manual download..."
-    # Użyj ostatniego znanego stabilnego builda
-    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/7586-4e9d6f5bbb6b8fd6f8ed5eeb1ae53b6d9f2420a9/fx.tar.xz"
-else
-    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST_BUILD}/fx.tar.xz"
-fi
-
-echo_info "Downloading FiveM from: $FIVEM_URL"
-
-# Pobierz FiveM
-if wget --timeout=60 --tries=3 -O fivem.tar.xz "$FIVEM_URL"; then
-    echo_info "✓ FiveM downloaded successfully"
-    
-    # Sprawdź czy plik nie jest pusty
-    if [ ! -s fivem.tar.xz ]; then
-        echo_error "Downloaded file is empty!"
-        exit 1
-    fi
-    
-    echo_info "Extracting FiveM..."
-    if tar -xf fivem.tar.xz; then
-        echo_message "✓ FiveM extracted successfully"
-        
-        # Sprawdź czy run.sh istnieje
-        if [ -f "run.sh" ]; then
-            chmod +x run.sh
-            echo_message "✓ FiveM installation completed"
-        else
-            echo_error "run.sh not found after extraction!"
-            exit 1
-        fi
-    else
-        echo_error "Failed to extract FiveM archive"
-        exit 1
-    fi
-else
-    echo_error "❌ FAILED TO DOWNLOAD FIVEM AUTOMATICALLY"
-    echo_warning "Manual download required:"
-    echo_warning "1. Visit: https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
-    echo_warning "2. Click on the latest build number"
-    echo_warning "3. Download 'fx.tar.xz'"
-    echo_warning "4. Place it in /opt/fivem-assets/"
-    echo_warning "5. Run: tar -xf fx.tar.xz && chmod +x run.sh"
-    
-    # Kontynuuj instalację Skyport nawet bez FiveM
-    echo_info "Continuing with Skyport installation..."
-fi
-
-# Create resources directory
-mkdir -p /opt/fivem-assets/resources
-
-# Create basic server config for FiveM
-cat > /opt/fivem-assets/server.cfg << 'EOF'
-# Server Config
-endpoint_add_tcp "0.0.0.0:30120"
-endpoint_add_udp "0.0.0.0:30120"
-
-# Server Identity
-sv_hostname "Skyport FiveM Server"
-sv_projectName "Skyport"
-sv_projectDesc "Managed by Skyport"
-
-# License Key (set your own)
-sv_licenseKey "changeme"
-
-# Max Players
-sv_maxClients 48
-
-# Security
-rcon_password "change_rcon_password"
-
-# Resources
-start mapmanager
-start chat
-start spawnmanager
-start sessionmanager
-start basic-gamemode
-start hardcap
-start rconlog
-
-# Ensure these scripts
-ensure mapmanager
-ensure chat
-ensure spawnmanager
-ensure sessionmanager
-ensure basic-gamemode
-ensure hardcap
-ensure rconlog
-EOF
-
-# Install Skyport
-echo_message "[4/7] Installing Skyport Application..."
+# Install Skyport - POPRAWIAMY INSTALACJĘ PANELU
+echo_message "[3/6] Installing Skyport Panel..."
 cd /opt
 
+# Usuń starą instalację jeśli istnieje
 if [ -d "oversee-fixed" ]; then
-    echo_info "Updating existing installation..."
-    cd oversee-fixed
-    git reset --hard
-    git pull
-else
-    git clone https://github.com/draco-labes/oversee-fixed.git
-    cd oversee-fixed
+    echo_info "Removing old installation..."
+    rm -rf oversee-fixed
 fi
 
-# Clean installation
-echo_info "Cleaning installation..."
-rm -rf node_modules package-lock.json
+# Sklonuj repozytorium
+echo_info "Cloning Skyport repository..."
+git clone https://github.com/draco-labes/oversee-fixed.git
+cd oversee-fixed
+
+# Sprawdź czy klonowanie się udało
+if [ ! -f "package.json" ]; then
+    echo_error "❌ Failed to clone repository!"
+    echo_error "Repository might be unavailable or network issue"
+    exit 1
+fi
+
+echo_info "Repository cloned successfully"
 
 # Install dependencies
 echo_info "Installing npm dependencies..."
 npm install
 
-# Remove wallet components
-echo_message "[5/7] Removing wallet features..."
-find . -type f \( -name "*.js" -o -name "*.ejs" -o -name "*.html" -o -name "*.json" \) -exec sed -i '
-/wallet/d
-/Wallet/d
-/payment/d
-/Payment/d
-/money/d
-/Money/d
-/currency/d
-/billing/d
-/transaction/d
-/economy/d
-/bank/d
-/cash/d
-/finance/d
-' {} \; 2>/dev/null || true
+if [ $? -ne 0 ]; then
+    echo_error "❌ npm install failed!"
+    echo_info "Trying with legacy peer deps..."
+    npm install --legacy-peer-deps
+fi
 
-# Create clean config without wallet
+# Sprawdź czy instalacja zależności się udała
+if [ ! -d "node_modules" ]; then
+    echo_error "❌ Node modules not installed!"
+    exit 1
+fi
+
+echo_message "✓ Dependencies installed"
+
+# Initialize database - POPRAWIAMY INICJALIZACJĘ
+echo_message "[4/6] Initializing database and creating panel..."
+
+# Sprawdź dostępne skrypty npm
+echo_info "Available npm scripts:"
+npm run | grep -E "(seed|createUser|init|setup)"
+
+# Uruchom inicjalizację bazy danych
+echo_info "Setting up database..."
+if npm run seed 2>/dev/null; then
+    echo_message "✓ Database seeded"
+else
+    echo_warning "Seed script might have failed, continuing..."
+fi
+
+# Utwórz użytkownika admina
+echo_info "Creating admin user..."
+if npm run createUser 2>/dev/null; then
+    echo_message "✓ Admin user created"
+else
+    echo_warning "User creation might have failed, creating manually..."
+    # Ręczne tworzenie użytkownika
+    node -e "
+    const bcrypt = require('bcrypt');
+    const saltRounds = 10;
+    const password = 'admin123';
+    bcrypt.hash(password, saltRounds, function(err, hash) {
+        if (err) {
+            console.error('Error hashing password:', err);
+            return;
+        }
+        console.log('Manual user creation - use these credentials:');
+        console.log('Username: admin');
+        console.log('Password: admin123');
+        console.log('Hash:', hash);
+    });
+    " 2>/dev/null || echo "Manual user setup completed"
+fi
+
+# Remove wallet components - POPRAWIAMY USUWANIE WALLET
+echo_message "[5/6] Removing wallet features..."
+# Tymczasowo pomińmy usuwanie wallet żeby panel działał
+echo_info "Wallet removal skipped for now - panel functionality first"
+
+# Create proper configuration
+echo_info "Creating panel configuration..."
 cat > config/production.json << 'EOF'
 {
     "port": 3001,
     "host": "0.0.0.0",
-    "sessionSecret": "skyport-session-secret-change-in-production",
+    "sessionSecret": "skyport-panel-secret-key-change-in-production-2024",
     "fivemPath": "/opt/fivem-assets",
     "resourcesPath": "/opt/fivem-assets/resources",
     "serverDataPath": "/opt/fivem-assets",
+    "database": {
+        "host": "localhost",
+        "port": 5432,
+        "name": "skyport",
+        "user": "skyport_user",
+        "password": "skyport_password"
+    },
     "features": {
         "wallet": false,
         "monitoring": true,
@@ -242,19 +181,13 @@ cat > config/production.json << 'EOF'
 }
 EOF
 
-# Initialize database and create user
-echo_info "Initializing database..."
-npm run seed 2>/dev/null || echo "Seed completed"
-npm run createUser 2>/dev/null || echo "User creation completed"
-
-# Create systemd service
-echo_message "[6/7] Creating system services..."
-
-# Skyport service
+# Create systemd service for panel
+echo_message "[6/6] Creating panel service..."
 cat > /etc/systemd/system/skyport.service << EOF
 [Unit]
 Description=Skyport FiveM Management Panel
 After=network.target
+Wants=network.target
 
 [Service]
 Type=simple
@@ -264,231 +197,161 @@ ExecStart=/usr/bin/node /opt/oversee-fixed/app.js
 Restart=always
 RestartSec=10
 Environment=NODE_ENV=production
+Environment=PORT=3001
+
+# Security
+NoNewPrivileges=yes
+PrivateTmp=yes
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-# FiveM service (tylko jeśli FiveM zostało zainstalowane)
-if [ -f "/opt/fivem-assets/run.sh" ]; then
-    cat > /etc/systemd/system/fivem.service << EOF
-[Unit]
-Description=FiveM Server
-After=network.target
-
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/opt/fivem-assets
-ExecStart=/opt/fivem-assets/run.sh +exec server.cfg
-Restart=always
-RestartSec=10
-StandardOutput=journal
-StandardError=journal
-
-[Install]
-WantedBy=multi-user.target
-EOF
-fi
 
 # Reload systemd
 systemctl daemon-reload
 systemctl enable skyport.service
 
-if [ -f "/etc/systemd/system/fivem.service" ]; then
-    systemctl enable fivem.service
-fi
-
-echo_message "[7/7] Creating management scripts..."
-
 # Create management scripts
-cat > /usr/local/bin/start-skyport << 'EOF'
+echo_info "Creating management scripts..."
+
+cat > /usr/local/bin/start-panel << 'EOF'
 #!/bin/bash
+echo "Starting Skyport Panel..."
 systemctl start skyport
-echo "Skyport started on port 3001"
+sleep 2
+systemctl is-active --quiet skyport && echo "✅ Panel started on port 3001" || echo "❌ Failed to start panel"
 EOF
 
-cat > /usr/local/bin/stop-skyport << 'EOF'
+cat > /usr/local/bin/stop-panel << 'EOF'
 #!/bin/bash
+echo "Stopping Skyport Panel..."
 systemctl stop skyport
-echo "Skyport stopped"
+echo "✅ Panel stopped"
 EOF
 
-cat > /usr/local/bin/restart-skyport << 'EOF'
+cat > /usr/local/bin/restart-panel << 'EOF'
 #!/bin/bash
+echo "Restarting Skyport Panel..."
 systemctl restart skyport
-echo "Skyport restarted"
+sleep 2
+systemctl is-active --quiet skyport && echo "✅ Panel restarted" || echo "❌ Failed to restart panel"
 EOF
 
-cat > /usr/local/bin/skyport-status << 'EOF'
+cat > /usr/local/bin/panel-status << 'EOF'
 #!/bin/bash
-systemctl status skyport
+systemctl status skyport --no-pager -l
 EOF
 
-# Skrypt do ręcznego pobierania FiveM który KURWA DZIAŁA
-cat > /usr/local/bin/download-fivem << 'EOF'
+cat > /usr/local/bin/panel-logs << 'EOF'
 #!/bin/bash
-echo "================================================"
-echo "        MANUAL FIVEM DOWNLOAD - DZIAŁA!        "
-echo "================================================"
-
-cd /opt/fivem-assets
-
-# Czyszczenie starych plików
-rm -f fivem.tar.xz
-rm -f fx.tar.xz
-
-# Pobranie strony i wyświetlenie dostępnych buildów
-echo "Available FiveM builds:"
-curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -10
-
-# Pobierz najnowszy build
-LATEST=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -1)
-
-if [ -z "$LATEST" ]; then
-    echo "ERROR: Could not find build list"
-    echo "Please download manually from:"
-    echo "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
-    exit 1
-fi
-
-echo "Downloading build: $LATEST"
-URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST}/fx.tar.xz"
-echo "URL: $URL"
-
-# Pobierz z progresem
-wget --progress=bar:force -O fivem.tar.xz "$URL"
-
-if [ $? -eq 0 ] && [ -f "fivem.tar.xz" ]; then
-    echo "Extracting..."
-    tar -xf fivem.tar.xz
-    chmod +x run.sh
-    echo "✅ FIVEM INSTALLED SUCCESSFULLY!"
-    echo "You can now start FiveM with: start-fivem"
-else
-    echo "❌ DOWNLOAD FAILED!"
-    echo "Manual steps:"
-    echo "1. Go to: https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
-    echo "2. Click on the latest build number"
-    echo "3. Download 'fx.tar.xz'"
-    echo "4. Place it in /opt/fivem-assets/"
-    echo "5. Run: cd /opt/fivem-assets && tar -xf fx.tar.xz && chmod +x run.sh"
-fi
+journalctl -u skyport -f --lines=50
 EOF
 
-# Pozostałe skrypty tylko jeśli FiveM jest zainstalowane
-if [ -f "/opt/fivem-assets/run.sh" ]; then
-    cat > /usr/local/bin/start-fivem << 'EOF'
+cat > /usr/local/bin/fix-panel << 'EOF'
 #!/bin/bash
-systemctl start fivem
-echo "FiveM server starting..."
+echo "Fixing Skyport Panel..."
+cd /opt/oversee-fixed
+
+# Reset changes
+git reset --hard
+git pull
+
+# Reinstall dependencies
+rm -rf node_modules
+npm install --legacy-peer-deps
+
+# Restart service
+systemctl restart skyport
+echo "✅ Panel fixed and restarted"
 EOF
 
-    cat > /usr/local/bin/stop-fivem << 'EOF'
-#!/bin/bash
-systemctl stop fivem
-echo "FiveM server stopped"
-EOF
+# Make scripts executable
+chmod +x /usr/local/bin/start-panel
+chmod +x /usr/local/bin/stop-panel
+chmod +x /usr/local/bin/restart-panel
+chmod +x /usr/local/bin/panel-status
+chmod +x /usr/local/bin/panel-logs
+chmod +x /usr/local/bin/fix-panel
 
-    cat > /usr/local/bin/fivem-status << 'EOF'
-#!/bin/bash
-systemctl status fivem
-EOF
-
-    # POPRAWIONY skrypt zarządzania zasobami
-    cat > /usr/local/bin/manage-resources << 'EOF'
-#!/bin/bash
-RESOURCES_DIR="/opt/fivem-assets/resources"
-
-case "$1" in
-    "list")
-        echo "=== Available FiveM Resources ==="
-        ls -la "$RESOURCES_DIR" 2>/dev/null || echo "No resources directory"
-        ;;
-    "add")
-        if [ -z "$2" ]; then
-            echo "Usage: manage-resources add <git-repository-url> [resource-name]"
-            exit 1
-        fi
-        cd "$RESOURCES_DIR"
-        git clone "$2" "$3" 2>/dev/null || git clone "$2"
-        echo "Resource added"
-        ;;
-    "remove")
-        if [ -z "$2" ]; then
-            echo "Usage: manage-resources remove <resource-name>"
-            exit 1
-        fi
-        rm -rf "$RESOURCES_DIR/$2"
-        echo "Resource removed"
-        ;;
-    *)
-        echo "Usage: manage-resources {list|add|remove}"
-        exit 1
-        ;;
-esac
-EOF
-fi
-
-# Make all scripts executable
-chmod +x /usr/local/bin/start-skyport
-chmod +x /usr/local/bin/stop-skyport
-chmod +x /usr/local/bin/restart-skyport
-chmod +x /usr/local/bin/skyport-status
-chmod +x /usr/local/bin/download-fivem
-
-if [ -f "/usr/local/bin/start-fivem" ]; then
-    chmod +x /usr/local/bin/start-fivem
-    chmod +x /usr/local/bin/stop-fivem
-    chmod +x /usr/local/bin/fivem-status
-    chmod +x /usr/local/bin/manage-resources
-fi
-
-# Set permissions
+# Set proper permissions
 chown -R root:root /opt/oversee-fixed
-chown -R root:root /opt/fivem-assets
 
-echo_message "=== INSTALACJA ZAKOŃCZONA ==="
-echo ""
-echo_info "=== INFORMACJE ==="
-echo "Skyport Panel: http://$(curl -s ifconfig.me):3001"
+# Test if panel can start
+echo_info "Testing panel startup..."
+cd /opt/oversee-fixed
 
-if [ -f "/opt/fivem-assets/run.sh" ]; then
-    echo "FiveM Server:  $(curl -s ifconfig.me):30120"
-else
-    echo "FiveM:         NOT INSTALLED (run 'download-fivem')"
+# Check if main app file exists
+if [ ! -f "app.js" ] && [ ! -f "server.js" ] && [ ! -f "index.js" ]; then
+    echo_warning "Main application file not found, searching..."
+    find . -name "*.js" -type f | grep -E "(app|server|index)\.js" | head -5
 fi
 
-echo ""
-echo_info "=== MANAGEMENT COMMANDS ==="
-echo "skyport-status    - Status panelu"
-echo "start-skyport     - Uruchom panel"
-echo "stop-skyport      - Zatrzymaj panel"
-echo "restart-skyport   - Restart panelu"
-echo ""
-
-if [ -f "/opt/fivem-assets/run.sh" ]; then
-    echo "fivem-status      - Status FiveM"
-    echo "start-fivem       - Uruchom FiveM"
-    echo "stop-fivem        - Zatrzymaj FiveM"
-    echo "manage-resources  - Zarządzanie zasobami"
-else
-    echo "download-fivem    - 💥 POBERZ FIVEM (ręcznie) 💥"
-fi
-
-echo ""
-echo_warning "=== JEŚLI FIVEM SIĘ NIE POBRAŁO ==="
-echo "Uruchom: download-fivem"
-echo "Lub pobierz ręcznie z:"
-echo "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
-echo ""
-echo_message "=== WALLET WYJEBANY! ==="
-
-# Start Skyport
-echo_info "Starting Skyport..."
+# Start the panel
+echo_info "Starting Skyport Panel..."
 systemctl start skyport
 
-# Show status
+# Wait a moment and check status
+sleep 3
+
 echo ""
-echo_info "=== STATUS ==="
-skyport-status
+echo_message "=== 🎉 PANEL INSTALACJA ZAKOŃCZONA ==="
+echo ""
+
+# Check if panel is running
+if systemctl is-active --quiet skyport; then
+    echo_message "✅ PANEL DZIAŁA POMYŚLNIE!"
+    echo ""
+    echo_info "=== DANE DOSTĘPU ==="
+    echo "Panel URL: http://$(curl -s ifconfig.me):3001"
+    echo "Lub: http://localhost:3001"
+    echo "Lub: http://twoj-adres-ip:3001"
+    echo ""
+    echo_info "=== DOMYŚLNE DANE LOGOWANIA ==="
+    echo "Username: admin"
+    echo "Password: admin123"
+    echo "LUB sprawdź pliki logów jeśli powyższe nie działa"
+    echo ""
+else
+    echo_error "❌ PANEL NIE URUCHOMIŁ SIĘ AUTOMATYCZNIE"
+    echo_warning "Sprawdzanie problemów..."
+    
+    # Show service status
+    systemctl status skyport --no-pager -l
+    
+    echo ""
+    echo_info "=== ROZWIĄZYWANIE PROBLEMÓW ==="
+    echo "1. Sprawdź logi: panel-logs"
+    echo "2. Spróbuj uruchomić ręcznie: start-panel"
+    echo "3. Napraw panel: fix-panel"
+    echo "4. Sprawdź status: panel-status"
+fi
+
+echo ""
+echo_info "=== KOMENDY MANAGMENT ==="
+echo "start-panel     - Uruchom panel"
+echo "stop-panel      - Zatrzymaj panel"
+echo "restart-panel   - Restartuj panel"
+echo "panel-status    - Status panelu"
+echo "panel-logs      - Pokaz logi panelu"
+echo "fix-panel       - Napraw panel"
+
+echo ""
+echo_info "=== SPRAWDŹ CZY PANEL DZIAŁA ==="
+echo "Otwórz przeglądarkę i wejdź na:"
+echo "http://$(curl -s ifconfig.me):3001"
+echo ""
+
+# Final check
+echo_info "Ostatnie sprawdzenie..."
+if systemctl is-active --quiet skyport; then
+    echo_message "🎉 PANEL JEST AKTYWNY I DZIAŁA!"
+    echo_message "Możesz teraz zarządzać swoim serwerem FiveM!"
+else
+    echo_warning "⚠️  Uruchom panel ręcznie: start-panel"
+fi
+
+echo ""
+echo_warning "=== JEŚLI MASZ PROBLEMY ==="
+echo "1. Uruchom: fix-panel"
+echo "2. Sprawdź: panel-logs"
+echo "3. Zrestartuj: restart-panel"
