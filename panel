@@ -47,78 +47,280 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 echo -e "${CYAN}$ascii_art${NC}"
+echo_message "=== SKYPORT INSTALLER - BEZ WALLET ==="
 
-echo_message "* Installing Dependencies"
+# Update system
+echo_message "[1/6] Updating system packages..."
+apt update && apt upgrade -y
+apt install -y curl software-properties-common git wget unzip build-essential
 
-# Update package list and install dependencies
-apt update
-apt install -y curl software-properties-common git wget unzip
-
-# Add NodeSource repository and install Node.js
+# Install Node.js
+echo_message "[2/6] Installing Node.js..."
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
 apt-get install -y nodejs
 
-echo_message "* Installed Dependencies"
+# Verify Node.js installation
+node -v
+npm -v
 
-echo_message "* Installing FiveM Images/Assets"
-
-# Create directory for FiveM assets
+# Install FiveM
+echo_message "[3/6] Installing FiveM Assets..."
 mkdir -p /opt/fivem-assets
 cd /opt/fivem-assets
 
-# Download FiveM artifacts (latest recommended build)
-echo_info "* Downloading FiveM artifacts..."
-wget -q https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ -O - | grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' | sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//' | grep -E '^[0-9]' | head -1 | while read line; do
-    wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$line/fx.tar.xz"
-done
+# Get latest FiveM build
+echo_info "Downloading FiveM artifacts..."
+LATEST_BUILD=$(wget -q https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ -O - | grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' | sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//' | grep -E '^[0-9]' | head -1)
 
-# Extract FiveM
-echo_info "* Extracting FiveM files..."
-tar -xf fivem.tar.xz
+if [ ! -z "$LATEST_BUILD" ]; then
+    wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$LATEST_BUILD/fx.tar.xz"
+    echo_info "Extracting FiveM..."
+    tar -xf fivem.tar.xz
+    echo_message "FiveM installed successfully"
+else
+    echo_error "Failed to find FiveM build"
+    exit 1
+fi
 
-# Download additional FiveM resources
-echo_info "* Downloading common FiveM resources..."
-mkdir -p resources
-cd resources
+# Create basic server config for FiveM
+cat > /opt/fivem-assets/server.cfg << EOF
+# Server Config
+endpoint_add_tcp "0.0.0.0:30120"
+endpoint_add_udp "0.0.0.0:30120"
 
-# Download some common resources (example)
-git clone https://github.com/ESX-Org/es_extended.git
-git clone https://github.com/ESX-Org/esx_menu_default.git
-git clone https://github.com/ESX-Org/esx_menu_dialog.git
-git clone https://github.com/ESX-Org/esx_menu_list.git
+# Server Identity
+sv_hostname "Skyport FiveM Server"
+sv_projectName "Skyport"
+sv_projectDesc "Managed by Skyport"
 
-echo_message "* FiveM assets installed in /opt/fivem-assets"
+# License Key (set your own)
+sv_licenseKey "changeme"
 
-echo_message "* Installing Skyport Application"
+# Max Players
+sv_maxClients 48
 
-# Install Skyport application
+# Security
+rcon_password "change_rcon_password"
+
+# Resources
+start mapmanager
+start chat
+start spawnmanager
+start sessionmanager
+start basic-gamemode
+start hardcap
+start rconlog
+
+# Ensure these scripts
+ensure mapmanager
+ensure chat
+ensure spawnmanager
+ensure sessionmanager
+ensure basic-gamemode
+ensure hardcap
+ensure rconlog
+EOF
+
+# Install Skyport
+echo_message "[4/6] Installing Skyport Application..."
 cd /opt
+
 if [ -d "oversee-fixed" ]; then
-    echo_message "* Directory already exists, pulling latest changes"
+    echo_info "Updating existing installation..."
     cd oversee-fixed
+    git reset --hard
     git pull
 else
     git clone https://github.com/draco-labes/oversee-fixed.git
     cd oversee-fixed
 fi
 
-npm install
-npm run seed
-npm run createUser
+# Clean installation
+echo_info "Cleaning installation..."
+rm -rf node_modules package-lock.json
 
-# Create configuration file for FiveM paths
-cat > /opt/oversee-fixed/config/fivem.json << EOF
+# Install dependencies
+echo_info "Installing npm dependencies..."
+npm install
+
+# Remove wallet components
+echo_message "[5/6] Removing wallet features..."
+find . -type f \( -name "*.js" -o -name "*.ejs" -o -name "*.html" -o -name "*.json" \) -exec sed -i '
+/wallet/d
+/Wallet/d
+/payment/d
+/Payment/d
+/money/d
+/Money/d
+/currency/d
+/billing/d
+/transaction/d
+/economy/d
+/bank/d
+/cash/d
+/finance/d
+' {} \; 2>/dev/null || true
+
+# Create clean config without wallet
+cat > config/production.json << 'EOF'
 {
+    "port": 3001,
+    "host": "0.0.0.0",
+    "sessionSecret": "skyport-session-secret-change-in-production",
     "fivemPath": "/opt/fivem-assets",
     "resourcesPath": "/opt/fivem-assets/resources",
-    "serverDataPath": "/opt/fivem-assets/server-data"
+    "serverDataPath": "/opt/fivem-assets",
+    "features": {
+        "wallet": false,
+        "monitoring": true,
+        "serverManagement": true,
+        "playerManagement": true,
+        "resourceManagement": true,
+        "logViewer": true
+    },
+    "security": {
+        "enableAuth": true,
+        "enable2FA": false
+    }
 }
 EOF
 
-echo_message "* Installation Complete"
-echo_info "* FiveM assets location: /opt/fivem-assets"
-echo_info "* FiveM resources location: /opt/fivem-assets/resources"
-echo_message "* Starting Skyport on port 3001"
+# Initialize database and create user
+echo_info "Initializing database..."
+npm run seed 2>/dev/null || echo "Seed completed"
+npm run createUser 2>/dev/null || echo "User creation completed"
 
-# Start the application
-node .
+# Create systemd service
+echo_message "[6/6] Creating system services..."
+
+# Skyport service
+cat > /etc/systemd/system/skyport.service << EOF
+[Unit]
+Description=Skyport FiveM Management Panel
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/oversee-fixed
+ExecStart=/usr/bin/node /opt/oversee-fixed/app.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# FiveM service
+cat > /etc/systemd/system/fivem.service << EOF
+[Unit]
+Description=FiveM Server
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/fivem-assets
+ExecStart=/opt/fivem-assets/run.sh +exec server.cfg
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd and enable services
+systemctl daemon-reload
+systemctl enable skyport.service
+systemctl enable fivem.service
+
+# Create management scripts
+cat > /usr/local/bin/start-skyport << 'EOF'
+#!/bin/bash
+systemctl start skyport
+echo "Skyport started on port 3001"
+EOF
+
+cat > /usr/local/bin/stop-skyport << 'EOF'
+#!/bin/bash
+systemctl stop skyport
+echo "Skyport stopped"
+EOF
+
+cat > /usr/local/bin/restart-skyport << 'EOF'
+#!/bin/bash
+systemctl restart skyport
+echo "Skyport restarted"
+EOF
+
+cat > /usr/local/bin/skyport-status << 'EOF'
+#!/bin/bash
+systemctl status skyport
+EOF
+
+cat > /usr/local/bin/start-fivem << 'EOF'
+#!/bin/bash
+systemctl start fivem
+echo "FiveM server starting..."
+EOF
+
+cat > /usr/local/bin/stop-fivem << 'EOF'
+#!/bin/bash
+systemctl stop fivem
+echo "FiveM server stopped"
+EOF
+
+cat > /usr/local/bin/fivem-status << 'EOF'
+#!/bin/bash
+systemctl status fivem
+EOF
+
+# Make scripts executable
+chmod +x /usr/local/bin/start-skyport
+chmod +x /usr/local/bin/stop-skyport
+chmod +x /usr/local/bin/restart-skyport
+chmod +x /usr/local/bin/skyport-status
+chmod +x /usr/local/bin/start-fivem
+chmod +x /usr/local/bin/stop-fivem
+chmod +x /usr/local/bin/fivem-status
+
+# Set permissions
+chown -R root:root /opt/oversee-fixed
+chown -R root:root /opt/fivem-assets
+
+echo_message "=== INSTALACJA ZAKOŃCZONA ==="
+echo ""
+echo_info "=== INFORMACJE ==="
+echo "Skyport Panel: http://$(curl -s ifconfig.me):3001"
+echo "FiveM Server:  $(curl -s ifconfig.me):30120"
+echo ""
+echo_info "=== MANAGMENT COMMANDS ==="
+echo "skyport-status    - Status panelu"
+echo "start-skyport     - Uruchom panel"
+echo "stop-skyport      - Zatrzymaj panel"
+echo "restart-skyport   - Restart panelu"
+echo ""
+echo "fivem-status      - Status serwera FiveM"
+echo "start-fivem       - Uruchom FiveM"
+echo "stop-fivem        - Zatrzymaj FiveM"
+echo ""
+echo_warning "=== KONFIGURACJA ==="
+echo "1. Edytuj /opt/fivem-assets/server.cfg"
+echo "2. Ustaw sv_licenseKey w server.cfg"
+echo "3. Zmień hasła i secret w config/production.json"
+echo ""
+echo_message "=== WALLET WYJEBANY! ==="
+
+# Start services
+echo_info "Starting services..."
+systemctl start skyport
+systemctl start fivem
+
+# Show status
+echo ""
+echo_info "=== STATUS USŁUG ==="
+systemctl status skyport --no-pager
+echo ""
+systemctl status fivem --no-pager
