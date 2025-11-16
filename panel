@@ -20,32 +20,43 @@ CYAN='\033[0;36m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
+# Function for consistent messaging
+echo_message() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+echo_error() {
+    echo -e "${RED}$1${NC}"
+}
+
 # Clear the screen
 clear
 
 # Check if the script is run as root
 if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}Please run this script as root.${NC}"
+  echo_error "Please run this script as root."
   exit 1
 fi
 
 echo -e "${CYAN}$ascii_art${NC}"
 
-echo -e "${YELLOW}* Installing Dependencies${NC}"
+echo_message "* Installing Dependencies"
 
 # Update package list and install dependencies
 apt update
-apt install -y curl software-properties-common
+apt install -y curl software-properties-common git
+
+# Add NodeSource repository and install Node.js
 curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-apt-get install -y nodejs git
+apt-get install -y nodejs
 
-echo -e "${GREEN}* Installed Dependencies${NC}"
+echo_message "* Installed Dependencies"
 
-echo -e "${YELLOW}* Installing Application${NC}"
+echo_message "* Installing Application"
 
 # Create directory, clone repository, and install files
 if [ -d "oversee-fixed" ]; then
-    echo -e "${BLUE}* Directory already exists, pulling latest changes${NC}"
+    echo_message "* Directory already exists, pulling latest changes"
     cd oversee-fixed
     git pull
 else
@@ -57,9 +68,8 @@ npm install
 npm run seed
 npm run createUser
 
-echo -e "${GREEN}* Installation Complete${NC}"
-echo -e "${CYAN}* Starting Skyport on port 3001${NC}"
-echo -e "${YELLOW}* Wallet will only show 'buy coins' option${NC}"
+echo_message "* Installation Complete"
+echo_message "* Starting Skyport on port 3001"
 
 # Start the application
 node .
