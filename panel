@@ -52,7 +52,7 @@ echo_message "=== SKYPORT INSTALLER - BEZ WALLET ==="
 # Update system
 echo_message "[1/7] Updating system packages..."
 apt update && apt upgrade -y
-apt install -y curl software-properties-common git wget unzip build-essential jq
+apt install -y curl software-properties-common git wget unzip build-essential
 
 # Install Node.js
 echo_message "[2/7] Installing Node.js..."
@@ -63,62 +63,84 @@ apt-get install -y nodejs
 echo_info "Node.js version: $(node -v)"
 echo_info "NPM version: $(npm -v)"
 
-# Install FiveM
+# Install FiveM - NAPRAWIONA METODA
 echo_message "[3/7] Installing FiveM Assets..."
 mkdir -p /opt/fivem-assets
 cd /opt/fivem-assets
 
-# Get latest FiveM build - POPRAWIONA METODA
-echo_info "Searching for latest FiveM build..."
+# PROSTA I DZIAŁAJĄCA METODA POBRANIA FIVEM
+echo_info "Downloading FiveM using reliable method..."
 
-# Method 1: Use FiveM API to get latest build
-FIVEM_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -o 'href="[0-9]*-[a-zA-Z0-9]*/' | grep -o '[0-9]*-[a-zA-Z0-9]*' | head -1)
+# Pobierz stronę i przetwórz ją poprawnie
+echo_info "Fetching latest FiveM build information..."
+FIVEM_HTML=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/)
 
-# Method 2: Alternative approach if first fails
-if [ -z "$FIVEM_BUILD" ]; then
-    echo_warning "Method 1 failed, trying alternative method..."
-    FIVEM_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE '<a href="[0-9]+-[a-zA-Z0-9]+/' | sed 's/<a href="//g' | sed 's/\///g' | head -1)
+# Kilka różnych metod parsowania - jedna na pewno zadziała
+LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -1)
+
+if [ -z "$LATEST_BUILD" ]; then
+    LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oE '>[0-9]+-[a-f0-9]+/<' | sed 's/[><]//g' | head -1)
 fi
 
-# Method 3: Direct download latest known stable
-if [ -z "$FIVEM_BUILD" ]; then
-    echo_warning "Could not detect latest build, downloading stable version..."
-    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE 'href="[0-9]+-[a-zA-Z0-9]+/' | grep -oE '[0-9]+-[a-zA-Z0-9]+' | sort -V | tail -1)/fx.tar.xz"
+if [ -z "$LATEST_BUILD" ]; then
+    LATEST_BUILD=$(echo "$FIVEM_HTML" | grep -oE '[0-9]{4}-[a-f0-9]{40}' | head -1)
+fi
+
+# Jeśli nadal nie znaleziono, użyj ręcznego linka
+if [ -z "$LATEST_BUILD" ]; then
+    echo_warning "Auto-detection failed, using manual download..."
+    # Użyj ostatniego znanego stabilnego builda
+    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/7586-4e9d6f5bbb6b8fd6f8ed5eeb1ae53b6d9f2420a9/fx.tar.xz"
 else
-    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${FIVEM_BUILD}/fx.tar.xz"
+    FIVEM_URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST_BUILD}/fx.tar.xz"
 fi
 
 echo_info "Downloading FiveM from: $FIVEM_URL"
 
-# Download FiveM
-if wget -O fivem.tar.xz "$FIVEM_URL"; then
-    echo_info "FiveM downloaded successfully"
-    echo_info "Extracting FiveM..."
+# Pobierz FiveM
+if wget --timeout=60 --tries=3 -O fivem.tar.xz "$FIVEM_URL"; then
+    echo_info "✓ FiveM downloaded successfully"
     
-    # Extract FiveM
+    # Sprawdź czy plik nie jest pusty
+    if [ ! -s fivem.tar.xz ]; then
+        echo_error "Downloaded file is empty!"
+        exit 1
+    fi
+    
+    echo_info "Extracting FiveM..."
     if tar -xf fivem.tar.xz; then
         echo_message "✓ FiveM extracted successfully"
         
-        # Make run.sh executable
-        chmod +x run.sh
-        echo_message "✓ FiveM installation completed"
+        # Sprawdź czy run.sh istnieje
+        if [ -f "run.sh" ]; then
+            chmod +x run.sh
+            echo_message "✓ FiveM installation completed"
+        else
+            echo_error "run.sh not found after extraction!"
+            exit 1
+        fi
     else
         echo_error "Failed to extract FiveM archive"
         exit 1
     fi
 else
-    echo_error "Failed to download FiveM"
-    echo_warning "You can manually download FiveM from:"
-    echo_warning "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
-    echo_warning "And place fx.tar.xz in /opt/fivem-assets/"
-    exit 1
+    echo_error "❌ FAILED TO DOWNLOAD FIVEM AUTOMATICALLY"
+    echo_warning "Manual download required:"
+    echo_warning "1. Visit: https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
+    echo_warning "2. Click on the latest build number"
+    echo_warning "3. Download 'fx.tar.xz'"
+    echo_warning "4. Place it in /opt/fivem-assets/"
+    echo_warning "5. Run: tar -xf fx.tar.xz && chmod +x run.sh"
+    
+    # Kontynuuj instalację Skyport nawet bez FiveM
+    echo_info "Continuing with Skyport installation..."
 fi
 
 # Create resources directory
 mkdir -p /opt/fivem-assets/resources
 
 # Create basic server config for FiveM
-cat > /opt/fivem-assets/server.cfg << EOF
+cat > /opt/fivem-assets/server.cfg << 'EOF'
 # Server Config
 endpoint_add_tcp "0.0.0.0:30120"
 endpoint_add_udp "0.0.0.0:30120"
@@ -247,8 +269,9 @@ Environment=NODE_ENV=production
 WantedBy=multi-user.target
 EOF
 
-# FiveM service
-cat > /etc/systemd/system/fivem.service << EOF
+# FiveM service (tylko jeśli FiveM zostało zainstalowane)
+if [ -f "/opt/fivem-assets/run.sh" ]; then
+    cat > /etc/systemd/system/fivem.service << EOF
 [Unit]
 Description=FiveM Server
 After=network.target
@@ -266,11 +289,15 @@ StandardError=journal
 [Install]
 WantedBy=multi-user.target
 EOF
+fi
 
-# Reload systemd and enable services
+# Reload systemd
 systemctl daemon-reload
 systemctl enable skyport.service
-systemctl enable fivem.service
+
+if [ -f "/etc/systemd/system/fivem.service" ]; then
+    systemctl enable fivem.service
+fi
 
 echo_message "[7/7] Creating management scripts..."
 
@@ -298,175 +325,124 @@ cat > /usr/local/bin/skyport-status << 'EOF'
 systemctl status skyport
 EOF
 
-cat > /usr/local/bin/start-fivem << 'EOF'
+# Skrypt do ręcznego pobierania FiveM który KURWA DZIAŁA
+cat > /usr/local/bin/download-fivem << 'EOF'
+#!/bin/bash
+echo "================================================"
+echo "        MANUAL FIVEM DOWNLOAD - DZIAŁA!        "
+echo "================================================"
+
+cd /opt/fivem-assets
+
+# Czyszczenie starych plików
+rm -f fivem.tar.xz
+rm -f fx.tar.xz
+
+# Pobranie strony i wyświetlenie dostępnych buildów
+echo "Available FiveM builds:"
+curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -10
+
+# Pobierz najnowszy build
+LATEST=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oP 'href="\K[0-9]+-[a-f0-9]+(?=/)' | head -1)
+
+if [ -z "$LATEST" ]; then
+    echo "ERROR: Could not find build list"
+    echo "Please download manually from:"
+    echo "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
+    exit 1
+fi
+
+echo "Downloading build: $LATEST"
+URL="https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST}/fx.tar.xz"
+echo "URL: $URL"
+
+# Pobierz z progresem
+wget --progress=bar:force -O fivem.tar.xz "$URL"
+
+if [ $? -eq 0 ] && [ -f "fivem.tar.xz" ]; then
+    echo "Extracting..."
+    tar -xf fivem.tar.xz
+    chmod +x run.sh
+    echo "✅ FIVEM INSTALLED SUCCESSFULLY!"
+    echo "You can now start FiveM with: start-fivem"
+else
+    echo "❌ DOWNLOAD FAILED!"
+    echo "Manual steps:"
+    echo "1. Go to: https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
+    echo "2. Click on the latest build number"
+    echo "3. Download 'fx.tar.xz'"
+    echo "4. Place it in /opt/fivem-assets/"
+    echo "5. Run: cd /opt/fivem-assets && tar -xf fx.tar.xz && chmod +x run.sh"
+fi
+EOF
+
+# Pozostałe skrypty tylko jeśli FiveM jest zainstalowane
+if [ -f "/opt/fivem-assets/run.sh" ]; then
+    cat > /usr/local/bin/start-fivem << 'EOF'
 #!/bin/bash
 systemctl start fivem
 echo "FiveM server starting..."
 EOF
 
-cat > /usr/local/bin/stop-fivem << 'EOF'
+    cat > /usr/local/bin/stop-fivem << 'EOF'
 #!/bin/bash
 systemctl stop fivem
 echo "FiveM server stopped"
 EOF
 
-cat > /usr/local/bin/fivem-status << 'EOF'
+    cat > /usr/local/bin/fivem-status << 'EOF'
 #!/bin/bash
 systemctl status fivem
 EOF
 
-# Skrypt do ręcznego pobierania FiveM
-cat > /usr/local/bin/update-fivem << 'EOF'
+    # POPRAWIONY skrypt zarządzania zasobami
+    cat > /usr/local/bin/manage-resources << 'EOF'
 #!/bin/bash
-echo "Updating FiveM..."
-cd /opt/fivem-assets
-
-# Get latest build
-LATEST_BUILD=$(curl -s https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ | grep -oE 'href="[0-9]+-[a-zA-Z0-9]+/' | sed 's/href="//g' | sed 's/\///g' | head -1)
-
-if [ -z "$LATEST_BUILD" ]; then
-    echo "Failed to find latest FiveM build"
-    exit 1
-fi
-
-echo "Downloading build: $LATEST_BUILD"
-wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/${LATEST_BUILD}/fx.tar.xz"
-
-if [ $? -eq 0 ]; then
-    tar -xf fivem.tar.xz
-    chmod +x run.sh
-    echo "FiveM updated successfully!"
-    echo "Restarting FiveM service..."
-    systemctl restart fivem
-else
-    echo "Failed to download FiveM"
-fi
-EOF
-
-# POPRAWIONY skrypt zarządzania zasobami
-cat > /usr/local/bin/manage-resources << 'EOF'
-#!/bin/bash
-
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
-echo_info() { echo -e "${GREEN}$1${NC}"; }
-echo_error() { echo -e "${RED}$1${NC}"; }
-echo_warning() { echo -e "${YELLOW}$1${NC}"; }
-
 RESOURCES_DIR="/opt/fivem-assets/resources"
-
-if [ ! -d "$RESOURCES_DIR" ]; then
-    echo_error "Resources directory does not exist: $RESOURCES_DIR"
-    exit 1
-fi
 
 case "$1" in
     "list")
-        echo_info "=== Available FiveM Resources ==="
-        if [ "$(ls -A $RESOURCES_DIR 2>/dev/null)" ]; then
-            ls -la "$RESOURCES_DIR"
-        else
-            echo_warning "No resources found"
-        fi
+        echo "=== Available FiveM Resources ==="
+        ls -la "$RESOURCES_DIR" 2>/dev/null || echo "No resources directory"
         ;;
     "add")
         if [ -z "$2" ]; then
-            echo_error "Usage: manage-resources add <git-repository-url> [resource-name]"
+            echo "Usage: manage-resources add <git-repository-url> [resource-name]"
             exit 1
         fi
-        
-        REPO_URL="$2"
-        if [ -n "$3" ]; then
-            RESOURCE_NAME="$3"
-        else
-            RESOURCE_NAME=$(basename "$REPO_URL" .git)
-        fi
-        
-        echo_info "Adding resource: $RESOURCE_NAME"
         cd "$RESOURCES_DIR"
-        
-        if git clone "$REPO_URL" "$RESOURCE_NAME" 2>/dev/null; then
-            echo_info "✓ Resource '$RESOURCE_NAME' added successfully"
-        else
-            echo_error "✗ Failed to add resource '$RESOURCE_NAME'"
-            exit 1
-        fi
+        git clone "$2" "$3" 2>/dev/null || git clone "$2"
+        echo "Resource added"
         ;;
     "remove")
         if [ -z "$2" ]; then
-            echo_error "Usage: manage-resources remove <resource-name>"
-            echo_info "Available resources:"
-            ls "$RESOURCES_DIR" 2>/dev/null || echo "No resources"
+            echo "Usage: manage-resources remove <resource-name>"
             exit 1
         fi
-        
-        RESOURCE_NAME="$2"
-        RESOURCE_PATH="$RESOURCES_DIR/$RESOURCE_NAME"
-        
-        if [ ! -d "$RESOURCE_PATH" ]; then
-            echo_error "Resource '$RESOURCE_NAME' does not exist"
-            echo_info "Available resources:"
-            ls "$RESOURCES_DIR" 2>/dev/null || echo "No resources"
-            exit 1
-        fi
-        
-        echo_warning "Removing resource: $RESOURCE_NAME"
-        rm -rf "$RESOURCE_PATH"
-        echo_info "✓ Resource '$RESOURCE_NAME' removed successfully"
-        ;;
-    "update")
-        if [ -z "$2" ]; then
-            echo_info "Updating all resources..."
-            cd "$RESOURCES_DIR"
-            for dir in */; do
-                dir=${dir%/}
-                if [ -d "$dir/.git" ]; then
-                    echo_info "Updating $dir..."
-                    cd "$dir"
-                    git pull
-                    cd ..
-                fi
-            done
-            echo_info "✓ All resources updated"
-        else
-            RESOURCE_NAME="$2"
-            RESOURCE_PATH="$RESOURCES_DIR/$RESOURCE_NAME"
-            if [ -d "$RESOURCE_PATH/.git" ]; then
-                echo_info "Updating $RESOURCE_NAME..."
-                cd "$RESOURCE_PATH"
-                git pull
-                echo_info "✓ Resource '$RESOURCE_NAME' updated"
-            else
-                echo_error "Resource '$RESOURCE_NAME' is not a git repository or doesn't exist"
-            fi
-        fi
+        rm -rf "$RESOURCES_DIR/$2"
+        echo "Resource removed"
         ;;
     *)
-        echo_error "Usage: manage-resources {list|add|remove|update}"
-        echo_info "Commands:"
-        echo_info "  list                          - List all resources"
-        echo_info "  add <url> [name]             - Add resource from Git"
-        echo_info "  remove <name>                - Remove resource"
-        echo_info "  update [name]                - Update all or specific resource"
+        echo "Usage: manage-resources {list|add|remove}"
         exit 1
         ;;
 esac
 EOF
+fi
 
 # Make all scripts executable
 chmod +x /usr/local/bin/start-skyport
 chmod +x /usr/local/bin/stop-skyport
 chmod +x /usr/local/bin/restart-skyport
 chmod +x /usr/local/bin/skyport-status
-chmod +x /usr/local/bin/start-fivem
-chmod +x /usr/local/bin/stop-fivem
-chmod +x /usr/local/bin/fivem-status
-chmod +x /usr/local/bin/manage-resources
-chmod +x /usr/local/bin/update-fivem
+chmod +x /usr/local/bin/download-fivem
+
+if [ -f "/usr/local/bin/start-fivem" ]; then
+    chmod +x /usr/local/bin/start-fivem
+    chmod +x /usr/local/bin/stop-fivem
+    chmod +x /usr/local/bin/fivem-status
+    chmod +x /usr/local/bin/manage-resources
+fi
 
 # Set permissions
 chown -R root:root /opt/oversee-fixed
@@ -476,7 +452,13 @@ echo_message "=== INSTALACJA ZAKOŃCZONA ==="
 echo ""
 echo_info "=== INFORMACJE ==="
 echo "Skyport Panel: http://$(curl -s ifconfig.me):3001"
-echo "FiveM Server:  $(curl -s ifconfig.me):30120"
+
+if [ -f "/opt/fivem-assets/run.sh" ]; then
+    echo "FiveM Server:  $(curl -s ifconfig.me):30120"
+else
+    echo "FiveM:         NOT INSTALLED (run 'download-fivem')"
+fi
+
 echo ""
 echo_info "=== MANAGEMENT COMMANDS ==="
 echo "skyport-status    - Status panelu"
@@ -484,36 +466,29 @@ echo "start-skyport     - Uruchom panel"
 echo "stop-skyport      - Zatrzymaj panel"
 echo "restart-skyport   - Restart panelu"
 echo ""
-echo "fivem-status      - Status serwera FiveM"
-echo "start-fivem       - Uruchom FiveM"
-echo "stop-fivem        - Zatrzymaj FiveM"
-echo "update-fivem      - Aktualizuj FiveM"
+
+if [ -f "/opt/fivem-assets/run.sh" ]; then
+    echo "fivem-status      - Status FiveM"
+    echo "start-fivem       - Uruchom FiveM"
+    echo "stop-fivem        - Zatrzymaj FiveM"
+    echo "manage-resources  - Zarządzanie zasobami"
+else
+    echo "download-fivem    - 💥 POBERZ FIVEM (ręcznie) 💥"
+fi
+
 echo ""
-echo "manage-resources  - Zarządzanie zasobami FiveM"
-echo ""
-echo_info "=== PRZYKŁADY ZASOBÓW ==="
-echo "manage-resources add https://github.com/ESX-Org/es_extended.git"
-echo "manage-resources add https://github.com/ESX-Org/esx_menu_default.git"
-echo "manage-resources list"
-echo ""
-echo_warning "=== KONFIGURACJA ==="
-echo "1. Edytuj /opt/fivem-assets/server.cfg"
-echo "2. Ustaw sv_licenseKey w server.cfg"
-echo "3. Zmień hasła i secret w config/production.json"
+echo_warning "=== JEŚLI FIVEM SIĘ NIE POBRAŁO ==="
+echo "Uruchom: download-fivem"
+echo "Lub pobierz ręcznie z:"
+echo "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/"
 echo ""
 echo_message "=== WALLET WYJEBANY! ==="
 
-# Start services
-echo_info "Starting services..."
+# Start Skyport
+echo_info "Starting Skyport..."
 systemctl start skyport
-
-# Don't start FiveM automatically (let user configure license first)
-echo_warning "FiveM service not started - configure license key first in server.cfg"
-echo_warning "Then run: start-fivem"
 
 # Show status
 echo ""
-echo_info "=== STATUS USŁUG ==="
+echo_info "=== STATUS ==="
 skyport-status
-echo ""
-fivem-status
