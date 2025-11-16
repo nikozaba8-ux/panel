@@ -1,31 +1,124 @@
 #!/bin/bash
-# manage-resources.sh
 
-RESOURCES_DIR="/opt/fivem-assets/resources"
+# ASCII Art
+ascii_art="
 
-case $1 in
-    "list")
-        echo "Available resources:"
-        ls -la $RESOURCES_DIR
-        ;;
-    "add")
-        if [ -z "$2" ]; then
-            echo "Usage: $0 add <git-repository-url>"
-            exit 1
-        fi
-        cd $RESOURCES_DIR
-        git clone $2
-        echo "Resource added successfully"
-        ;;
-    "remove")
-        if [ -z "$2" ]; then
-            echo "Usage: $0 remove <resource-name>"
-            exit 1
-        fi
-        rm -rf $RESOURCES_DIR/$2
-        echo "Resource removed successfully"
-        ;;
-    *)
-        echo "Usage: $0 {list|add|remove}"
-        ;;
-esac
+       _ _     _                 
+      | (_)   | |                
+      | |_ ___| |__  _ __  _   _ 
+  _   | | / __| '_ \| '_ \| | | |
+ | |__| | \__ \ | | | | | | |_| |
+  \____/|_|___/_| |_|_| |_|\__,_|
+                                 
+"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+YELLOW='\033[0;33m'
+NC='\033[0m' # No Color
+
+# Function for consistent messaging
+echo_message() {
+    echo -e "${GREEN}$1${NC}"
+}
+
+echo_error() {
+    echo -e "${RED}$1${NC}"
+}
+
+echo_warning() {
+    echo -e "${YELLOW}$1${NC}"
+}
+
+echo_info() {
+    echo -e "${BLUE}$1${NC}"
+}
+
+# Clear the screen
+clear
+
+# Check if the script is run as root
+if [ "$EUID" -ne 0 ]; then
+  echo_error "Please run this script as root."
+  exit 1
+fi
+
+echo -e "${CYAN}$ascii_art${NC}"
+
+echo_message "* Installing Dependencies"
+
+# Update package list and install dependencies
+apt update
+apt install -y curl software-properties-common git wget unzip
+
+# Add NodeSource repository and install Node.js
+curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+apt-get install -y nodejs
+
+echo_message "* Installed Dependencies"
+
+echo_message "* Installing FiveM Images/Assets"
+
+# Create directory for FiveM assets
+mkdir -p /opt/fivem-assets
+cd /opt/fivem-assets
+
+# Download FiveM artifacts (latest recommended build)
+echo_info "* Downloading FiveM artifacts..."
+wget -q https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/ -O - | grep -o '<a href=['"'"'"][^"'"'"']*['"'"'"]' | sed -e 's/^<a href=["'"'"']//' -e 's/["'"'"']$//' | grep -E '^[0-9]' | head -1 | while read line; do
+    wget -O fivem.tar.xz "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/$line/fx.tar.xz"
+done
+
+# Extract FiveM
+echo_info "* Extracting FiveM files..."
+tar -xf fivem.tar.xz
+
+# Download additional FiveM resources
+echo_info "* Downloading common FiveM resources..."
+mkdir -p resources
+cd resources
+
+# Download some common resources (example)
+git clone https://github.com/ESX-Org/es_extended.git
+git clone https://github.com/ESX-Org/esx_menu_default.git
+git clone https://github.com/ESX-Org/esx_menu_dialog.git
+git clone https://github.com/ESX-Org/esx_menu_list.git
+
+echo_message "* FiveM assets installed in /opt/fivem-assets"
+
+echo_message "* Installing Skyport Application"
+
+# Install Skyport application
+cd /opt
+if [ -d "oversee-fixed" ]; then
+    echo_message "* Directory already exists, pulling latest changes"
+    cd oversee-fixed
+    git pull
+else
+    git clone https://github.com/draco-labes/oversee-fixed.git
+    cd oversee-fixed
+fi
+
+npm install
+npm run seed
+npm run createUser
+
+# Create configuration file for FiveM paths
+cat > /opt/oversee-fixed/config/fivem.json << EOF
+{
+    "fivemPath": "/opt/fivem-assets",
+    "resourcesPath": "/opt/fivem-assets/resources",
+    "serverDataPath": "/opt/fivem-assets/server-data"
+}
+EOF
+
+echo_message "* Installation Complete"
+echo_info "* FiveM assets location: /opt/fivem-assets"
+echo_info "* FiveM resources location: /opt/fivem-assets/resources"
+echo_message "* Starting Skyport on port 3001"
+
+# Start the application
+node .
