@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # ==============================================
-# GAME PANEL - PTERODACTYL LIKE
-# Web Interface on port 8080
+# GAME PANEL - PTERODACTYL LIKE WITH NGINX
+# Web Interface on port 80 (Nginx)
 # ==============================================
 
 # Konfiguracja
@@ -12,10 +12,12 @@ SERVER_DIR="$PANEL_DIR/servers"
 LOG_DIR="$PANEL_DIR/logs"
 DB_DIR="$PANEL_DIR/database"
 CONFIG_DIR="$PANEL_DIR/config"
+NGINX_DIR="$PANEL_DIR/nginx"
 USERS_FILE="$DB_DIR/users.json"
 
-# Port panelu web
-WEB_PORT=8080
+# Porty
+WEB_PORT=80
+SSL_PORT=443
 
 # Kolory
 RED='\033[0;31m'
@@ -30,22 +32,875 @@ NC='\033[0m'
 create_structure() {
     echo -e "${PURPLE}🛠️  Tworzenie struktury panelu...${NC}"
     
-    mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR
-    mkdir -p $SERVER_DIR/fivem $SERVER_DIR/minecraft $SERVER_DIR/discord-bot
+    mkdir -p $WEB_DIR $SERVER_DIR $LOG_DIR $DB_DIR $CONFIG_DIR $NGINX_DIR
+    mkdir -p $SERVER_DIR/fivem $SERVER_DIR/minecraft $SERVER_DIR/python $SERVER_DIR/node
     
-    # Inicjalizacja bazy użytkowników
-    if [ ! -f "$USERS_FILE" ]; then
-        echo '{"users": [], "sessions": {}}' > "$USERS_FILE"
-    fi
-    
+    create_nginx_config
     create_web_interface
     create_config_files
-    create_servers
+    init_database
+}
+
+create_nginx_config() {
+    echo -e "${YELLOW}🌐 Konfiguracja Nginx...${NC}"
+    
+    # Główna konfiguracja Nginx
+    cat > "$NGINX_DIR/nginx.conf" << 'EOF'
+worker_processes auto;
+pid /tmp/nginx.pid;
+
+events {
+    worker_connections 1024;
+    use epoll;
+    multi_accept on;
+}
+
+http {
+    include /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # Logging
+    access_log /tmp/nginx_access.log;
+    error_log /tmp/nginx_error.log;
+
+    # Basic Settings
+    sendfile on;
+    tcp_nopush on;
+    tcp_nodelay on;
+    keepalive_timeout 65;
+    types_hash_max_size 2048;
+
+    # Gzip Settings
+    gzip on;
+    gzip_vary on;
+    gzip_min_length 1024;
+    gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
+
+    # Upstream for panel
+    upstream panel_backend {
+        server 127.0.0.1:8080;
+        keepalive 32;
+    }
+
+    # Server configuration
+    server {
+        listen 80 default_server;
+        listen [::]:80 default_server;
+        server_name _;
+
+        # Security headers
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Referrer-Policy "no-referrer-when-downgrade" always;
+        add_header Content-Security-Policy "default-src 'self' http: https: data: blob: 'unsafe-inline'" always;
+
+        # Root directory
+        root /home/codespace/game-panel/web;
+        index index.html;
+
+        # Panel API proxy
+        location /api/ {
+            proxy_pass http://panel_backend;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade $http_upgrade;
+            proxy_set_header Connection 'upgrade';
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_cache_bypass $http_upgrade;
+        }
+
+        # Static files
+        location /static/ {
+            alias /home/codespace/game-panel/web/static/;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # Serve panel files
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # Error pages
+        error_page 404 /404.html;
+        error_page 500 502 503 504 /50x.html;
+    }
+}
+EOF
 }
 
 create_web_interface() {
-    echo -e "${YELLOW}🌐 Tworzenie interfejsu web...${NC}"
+    echo -e "${YELLOW}🌐 Tworzenie interfejsu web w stylu Pterodactyl...${NC}"
     
+    # Główny plik HTML
+    cat > "$WEB_DIR/index.html" << 'EOF'
+<!DOCTYPE html>
+<html lang="pl" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Game Panel - Pterodactyl</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary: #158cba;
+            --primary-dark: #127aa3;
+            --secondary: #2ecc71;
+            --danger: #e74c3c;
+            --warning: #f39c12;
+            --dark: #1a1a1a;
+            --darker: #121212;
+            --light: #f8f9fa;
+            --gray: #6c757d;
+        }
+
+        [data-theme="dark"] {
+            --bg-primary: var(--darker);
+            --bg-secondary: var(--dark);
+            --text-primary: var(--light);
+            --text-secondary: var(--gray);
+            --border-color: #2d3748;
+        }
+
+        [data-theme="light"] {
+            --bg-primary: #ffffff;
+            --bg-secondary: #f8f9fa;
+            --text-primary: var(--dark);
+            --text-secondary: var(--gray);
+            --border-color: #dee2e6;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            transition: all 0.3s ease;
+        }
+
+        .navbar {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 1rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: var(--primary);
+        }
+
+        .navbar-nav {
+            display: flex;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .nav-item {
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        .nav-item:hover {
+            color: var(--primary);
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            min-height: calc(100vh - 80px);
+        }
+
+        .sidebar {
+            background: var(--bg-secondary);
+            border-right: 1px solid var(--border-color);
+            padding: 2rem 1rem;
+        }
+
+        .sidebar-menu {
+            list-style: none;
+        }
+
+        .menu-item {
+            padding: 0.75rem 1rem;
+            margin-bottom: 0.5rem;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .menu-item.active {
+            background: var(--primary);
+            color: white;
+        }
+
+        .menu-item:hover:not(.active) {
+            background: rgba(21, 140, 186, 0.1);
+        }
+
+        .main-content {
+            padding: 2rem;
+            background: var(--bg-primary);
+        }
+
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            padding: 1.5rem;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .stat-value {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .server-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        .server-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .server-header {
+            padding: 1rem 1.5rem;
+            background: rgba(21, 140, 186, 0.1);
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .server-icon {
+            font-size: 1.5rem;
+            margin-right: 0.5rem;
+        }
+
+        .server-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-online {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .server-info {
+            padding: 1rem 1.5rem;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .server-actions {
+            padding: 1rem 1.5rem;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.5rem;
+        }
+
+        .btn {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+        }
+
+        .btn-primary {
+            background: var(--primary);
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--danger);
+            color: white;
+        }
+
+        .btn-warning {
+            background: var(--warning);
+            color: white;
+        }
+
+        .btn-success {
+            background: var(--secondary);
+            color: white;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: var(--bg-secondary);
+            margin: 10% auto;
+            padding: 2rem;
+            border-radius: 8px;
+            max-width: 500px;
+            position: relative;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+        }
+
+        .resource-slider {
+            width: 100%;
+            margin: 1rem 0;
+        }
+
+        .theme-toggle {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1.2rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                grid-template-columns: 1fr;
+            }
+            
+            .sidebar {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="navbar-brand">
+            <i class="fas fa-dragon"></i>
+            <span>Pterodactyl Panel</span>
+        </div>
+        <div class="navbar-nav">
+            <button class="theme-toggle" onclick="toggleTheme()">
+                <i class="fas fa-moon"></i>
+            </button>
+            <a href="#" class="nav-item" onclick="showModal('createServerModal')">
+                <i class="fas fa-plus"></i> Create Server
+            </a>
+            <a href="#" class="nav-item" onclick="logout()">
+                <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+        </div>
+    </nav>
+
+    <!-- Main Layout -->
+    <div class="container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <ul class="sidebar-menu">
+                <li class="menu-item active" onclick="showSection('dashboard')">
+                    <i class="fas fa-tachometer-alt"></i>
+                    <span>Dashboard</span>
+                </li>
+                <li class="menu-item" onclick="showSection('servers')">
+                    <i class="fas fa-server"></i>
+                    <span>My Servers</span>
+                </li>
+                <li class="menu-item" onclick="showSection('settings')">
+                    <i class="fas fa-cog"></i>
+                    <span>Settings</span>
+                </li>
+            </ul>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Dashboard Section -->
+            <div id="dashboard-section">
+                <h1>Dashboard</h1>
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div class="stat-value" id="total-servers">0</div>
+                        <div>Total Servers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="active-servers">0</div>
+                        <div>Active Servers</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="cpu-usage">0%</div>
+                        <div>CPU Usage</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value" id="memory-usage">0%</div>
+                        <div>Memory Usage</div>
+                    </div>
+                </div>
+
+                <h2>My Servers</h2>
+                <div id="servers-list" class="dashboard-grid">
+                    <!-- Servers will be populated here -->
+                </div>
+            </div>
+
+            <!-- Servers Section -->
+            <div id="servers-section" style="display: none;">
+                <h1>My Servers</h1>
+                <div id="all-servers-list" class="dashboard-grid">
+                    <!-- All servers will be populated here -->
+                </div>
+            </div>
+
+            <!-- Settings Section -->
+            <div id="settings-section" style="display: none;">
+                <h1>Settings</h1>
+                <div class="stat-card">
+                    <h3>Account Settings</h3>
+                    <!-- Settings content -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Server Modal -->
+    <div id="createServerModal" class="modal">
+        <div class="modal-content">
+            <h2>Create New Server</h2>
+            <form id="create-server-form">
+                <div class="form-group">
+                    <label class="form-label">Server Name</label>
+                    <input type="text" class="form-control" id="server-name" required>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Server Type</label>
+                    <select class="form-control" id="server-type" required onchange="updateResourceLimits()">
+                        <option value="">Select type...</option>
+                        <option value="fivem">FiveM</option>
+                        <option value="minecraft">Minecraft</option>
+                        <option value="python">Python App</option>
+                        <option value="node">Node.js App</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">CPU Cores</label>
+                    <input type="range" class="resource-slider" id="cpu-cores" min="1" max="8" value="2">
+                    <span id="cpu-display">2 cores</span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Memory (MB)</label>
+                    <input type="range" class="resource-slider" id="memory-limit" min="512" max="8192" value="2048" step="512">
+                    <span id="memory-display">2048 MB</span>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label">Disk Space (MB)</label>
+                    <input type="range" class="resource-slider" id="disk-limit" min="1024" max="32768" value="8192" step="1024">
+                    <span id="disk-display">8192 MB</span>
+                </div>
+
+                <div class="form-group" id="node-version-group" style="display: none;">
+                    <label class="form-label">Node.js Version</label>
+                    <select class="form-control" id="node-version">
+                        <option value="18">Node.js 18</option>
+                        <option value="20">Node.js 20</option>
+                        <option value="22">Node.js 22</option>
+                    </select>
+                </div>
+
+                <div class="form-group" id="python-version-group" style="display: none;">
+                    <label class="form-label">Python Version</label>
+                    <select class="form-control" id="python-version">
+                        <option value="3.9">Python 3.9</option>
+                        <option value="3.10">Python 3.10</option>
+                        <option value="3.11">Python 3.11</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 10px; margin-top: 1rem;">
+                    <button type="button" class="btn btn-primary" onclick="createServer()">Create Server</button>
+                    <button type="button" class="btn" onclick="closeModal('createServerModal')">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let currentUser = null;
+        let userServers = [];
+
+        // Authentication check
+        function checkAuth() {
+            const token = localStorage.getItem('session_token');
+            if (!token) {
+                window.location.href = '/login.html';
+                return;
+            }
+            loadUserInfo();
+        }
+
+        // Load user information
+        async function loadUserInfo() {
+            try {
+                const response = await fetch('/api/auth/me', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('session_token')
+                    }
+                });
+                
+                if (!response.ok) throw new Error('Not authenticated');
+                
+                const data = await response.json();
+                currentUser = data;
+                loadServers();
+                updateStats();
+            } catch (error) {
+                logout();
+            }
+        }
+
+        // Load user's servers
+        async function loadServers() {
+            try {
+                const response = await fetch('/api/servers', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('session_token')
+                    }
+                });
+                
+                if (!response.ok) throw new Error('Failed to load servers');
+                
+                userServers = await response.json();
+                renderServers();
+            } catch (error) {
+                console.error('Error loading servers:', error);
+            }
+        }
+
+        // Render servers list
+        function renderServers() {
+            const serversList = document.getElementById('servers-list');
+            const allServersList = document.getElementById('all-servers-list');
+            
+            serversList.innerHTML = '';
+            allServersList.innerHTML = '';
+
+            userServers.forEach(server => {
+                const serverCard = createServerCard(server);
+                serversList.appendChild(serverCard);
+                allServersList.appendChild(serverCard.cloneNode(true));
+            });
+
+            document.getElementById('total-servers').textContent = userServers.length;
+            document.getElementById('active-servers').textContent = userServers.filter(s => s.status === 'running').length;
+        }
+
+        // Create server card element
+        function createServerCard(server) {
+            const card = document.createElement('div');
+            card.className = 'server-card';
+            
+            const icon = getServerIcon(server.type);
+            const statusClass = server.status === 'running' ? 'status-online' : 'status-offline';
+            
+            card.innerHTML = `
+                <div class="server-header">
+                    <div>
+                        <i class="${icon} server-icon"></i>
+                        <strong>${server.name}</strong>
+                    </div>
+                    <span class="server-status ${statusClass}">${server.status.toUpperCase()}</span>
+                </div>
+                <div class="server-info">
+                    <div class="info-row">
+                        <span>Type:</span>
+                        <span>${server.type.toUpperCase()}</span>
+                    </div>
+                    <div class="info-row">
+                        <span>CPU:</span>
+                        <span>${server.resources.cpu} cores</span>
+                    </div>
+                    <div class="info-row">
+                        <span>Memory:</span>
+                        <span>${server.resources.memory} MB</span>
+                    </div>
+                    <div class="info-row">
+                        <span>Disk:</span>
+                        <span>${server.resources.disk} MB</span>
+                    </div>
+                </div>
+                <div class="server-actions">
+                    <button class="btn ${server.status === 'running' ? 'btn-danger' : 'btn-success'}" 
+                            onclick="controlServer('${server.id}', '${server.status === 'running' ? 'stop' : 'start'}')">
+                        ${server.status === 'running' ? 'Stop' : 'Start'}
+                    </button>
+                    <button class="btn btn-warning" onclick="controlServer('${server.id}', 'restart')">Restart</button>
+                </div>
+            `;
+            
+            return card;
+        }
+
+        // Get server icon based on type
+        function getServerIcon(type) {
+            const icons = {
+                'fivem': 'fas fa-car',
+                'minecraft': 'fas fa-cube',
+                'python': 'fab fa-python',
+                'node': 'fab fa-node-js'
+            };
+            return icons[type] || 'fas fa-server';
+        }
+
+        // Update resource limits based on server type
+        function updateResourceLimits() {
+            const type = document.getElementById('server-type').value;
+            const cpuSlider = document.getElementById('cpu-cores');
+            const memorySlider = document.getElementById('memory-limit');
+            const nodeGroup = document.getElementById('node-version-group');
+            const pythonGroup = document.getElementById('python-version-group');
+
+            // Hide all version selects
+            nodeGroup.style.display = 'none';
+            pythonGroup.style.display = 'none';
+
+            // Set default limits based on server type
+            switch(type) {
+                case 'fivem':
+                    cpuSlider.value = 4;
+                    memorySlider.value = 4096;
+                    break;
+                case 'minecraft':
+                    cpuSlider.value = 2;
+                    memorySlider.value = 2048;
+                    break;
+                case 'python':
+                    cpuSlider.value = 1;
+                    memorySlider.value = 1024;
+                    pythonGroup.style.display = 'block';
+                    break;
+                case 'node':
+                    cpuSlider.value = 1;
+                    memorySlider.value = 512;
+                    nodeGroup.style.display = 'block';
+                    break;
+            }
+
+            updateResourceDisplays();
+        }
+
+        // Update resource value displays
+        function updateResourceDisplays() {
+            document.getElementById('cpu-display').textContent = document.getElementById('cpu-cores').value + ' cores';
+            document.getElementById('memory-display').textContent = document.getElementById('memory-limit').value + ' MB';
+            document.getElementById('disk-display').textContent = document.getElementById('disk-limit').value + ' MB';
+        }
+
+        // Create new server
+        async function createServer() {
+            const formData = {
+                name: document.getElementById('server-name').value,
+                type: document.getElementById('server-type').value,
+                resources: {
+                    cpu: parseInt(document.getElementById('cpu-cores').value),
+                    memory: parseInt(document.getElementById('memory-limit').value),
+                    disk: parseInt(document.getElementById('disk-limit').value)
+                },
+                version: document.getElementById('server-type').value === 'node' ? 
+                    document.getElementById('node-version').value :
+                    document.getElementById('server-type').value === 'python' ?
+                    document.getElementById('python-version').value : null
+            };
+
+            try {
+                const response = await fetch('/api/servers/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('session_token')
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) throw new Error('Failed to create server');
+
+                const newServer = await response.json();
+                userServers.push(newServer);
+                renderServers();
+                closeModal('createServerModal');
+                document.getElementById('create-server-form').reset();
+            } catch (error) {
+                alert('Error creating server: ' + error.message);
+            }
+        }
+
+        // Control server (start/stop/restart)
+        async function controlServer(serverId, action) {
+            try {
+                const response = await fetch('/api/servers/control', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + localStorage.getItem('session_token')
+                    },
+                    body: JSON.stringify({
+                        server_id: serverId,
+                        action: action
+                    })
+                });
+
+                if (!response.ok) throw new Error('Failed to control server');
+
+                loadServers(); // Reload servers to update status
+            } catch (error) {
+                alert('Error controlling server: ' + error.message);
+            }
+        }
+
+        // Update system stats
+        async function updateStats() {
+            try {
+                const response = await fetch('/api/stats', {
+                    headers: {
+                        'Authorization': 'Bearer ' + localStorage.getItem('session_token')
+                    }
+                });
+                
+                const data = await response.json();
+                document.getElementById('cpu-usage').textContent = data.cpu + '%';
+                document.getElementById('memory-usage').textContent = data.memory + '%';
+            } catch (error) {
+                console.error('Error updating stats:', error);
+            }
+        }
+
+        // UI Functions
+        function showSection(sectionName) {
+            document.querySelectorAll('.menu-item').forEach(item => {
+                item.classList.remove('active');
+            });
+            event.target.closest('.menu-item').classList.add('active');
+
+            document.getElementById('dashboard-section').style.display = 'none';
+            document.getElementById('servers-section').style.display = 'none';
+            document.getElementById('settings-section').style.display = 'none';
+            
+            document.getElementById(sectionName + '-section').style.display = 'block';
+        }
+
+        function showModal(modalId) {
+            document.getElementById(modalId).style.display = 'block';
+        }
+
+        function closeModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function toggleTheme() {
+            const currentTheme = document.documentElement.getAttribute('data-theme');
+            const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+            document.documentElement.setAttribute('data-theme', newTheme);
+            
+            const icon = document.querySelector('.theme-toggle i');
+            icon.className = newTheme === 'dark' ? 'fas fa-moon' : 'fas fa-sun';
+        }
+
+        function logout() {
+            localStorage.removeItem('session_token');
+            window.location.href = '/login.html';
+        }
+
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            checkAuth();
+            
+            // Add event listeners for resource sliders
+            document.getElementById('cpu-cores').addEventListener('input', updateResourceDisplays);
+            document.getElementById('memory-limit').addEventListener('input', updateResourceDisplays);
+            document.getElementById('disk-limit').addEventListener('input', updateResourceDisplays);
+
+            // Update stats every 5 seconds
+            setInterval(updateStats, 5000);
+        });
+
+        // Close modal when clicking outside
+        window.onclick = function(event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>
+EOF
+
     # Strona logowania
     cat > "$WEB_DIR/login.html" << 'EOF'
 <!DOCTYPE html>
@@ -53,238 +908,206 @@ create_web_interface() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Panel - Login</title>
+    <title>Login - Pterodactyl Panel</title>
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #158cba 0%, #106a8c 100%);
             color: #333;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
         }
-        
+
         .login-container {
             background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 40px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
             width: 100%;
             max-width: 400px;
         }
-        
+
         .logo {
             text-align: center;
-            margin-bottom: 30px;
+            margin-bottom: 2rem;
         }
-        
+
+        .logo i {
+            font-size: 3rem;
+            color: #158cba;
+            margin-bottom: 1rem;
+        }
+
         .logo h1 {
-            color: #4a5568;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            font-size: 1.8em;
+            color: #158cba;
+            margin-bottom: 0.5rem;
         }
-        
+
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 1rem;
         }
-        
-        .form-group label {
+
+        .form-label {
             display: block;
-            margin-bottom: 5px;
-            color: #4a5568;
+            margin-bottom: 0.5rem;
             font-weight: 600;
+            color: #2d3748;
         }
-        
-        .form-group input {
+
+        .form-control {
             width: 100%;
-            padding: 12px;
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            font-size: 16px;
-            transition: border-color 0.3s ease;
+            padding: 0.75rem;
+            border: 1px solid #cbd5e0;
+            border-radius: 4px;
+            font-size: 1rem;
         }
-        
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-        
+
         .btn {
             width: 100%;
-            padding: 12px;
-            background: #667eea;
+            padding: 0.75rem;
+            background: #158cba;
             color: white;
             border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
+            border-radius: 4px;
+            font-size: 1rem;
             cursor: pointer;
-            transition: all 0.3s ease;
+            transition: background 0.3s ease;
         }
-        
+
         .btn:hover {
-            background: #5a6fd8;
-            transform: translateY(-2px);
+            background: #127aa3;
         }
-        
+
         .tabs {
             display: flex;
-            margin-bottom: 20px;
+            margin-bottom: 1.5rem;
             border-bottom: 2px solid #e2e8f0;
         }
-        
+
         .tab {
             flex: 1;
             text-align: center;
-            padding: 10px;
+            padding: 0.75rem;
             cursor: pointer;
             border-bottom: 3px solid transparent;
         }
-        
+
         .tab.active {
-            border-bottom-color: #667eea;
-            color: #667eea;
+            border-bottom-color: #158cba;
+            color: #158cba;
             font-weight: 600;
         }
-        
+
         .tab-content {
             display: none;
         }
-        
+
         .tab-content.active {
             display: block;
         }
-        
+
         .message {
-            padding: 10px;
-            border-radius: 5px;
-            margin-bottom: 15px;
+            padding: 0.75rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
             text-align: center;
             display: none;
         }
-        
+
         .error {
             background: #fed7d7;
             color: #742a2a;
             border: 1px solid #feb2b2;
         }
-        
+
         .success {
             background: #c6f6d5;
             color: #22543d;
             border: 1px solid #9ae6b4;
-        }
-        
-        .footer {
-            text-align: center;
-            margin-top: 20px;
-            color: #718096;
-        }
-        
-        .footer a {
-            color: #667eea;
-            text-decoration: none;
         }
     </style>
 </head>
 <body>
     <div class="login-container">
         <div class="logo">
-            <h1>🕹️ Game Panel</h1>
-            <p>Zarządzanie serwerami gry</p>
+            <i class="fas fa-dragon"></i>
+            <h1>Pterodactyl Panel</h1>
+            <p>Game Server Management</p>
         </div>
-        
+
         <div class="tabs">
             <div class="tab active" onclick="switchTab('login')">Login</div>
             <div class="tab" onclick="switchTab('register')">Register</div>
         </div>
-        
+
         <div id="message" class="message"></div>
-        
-        <!-- Login Form -->
+
         <div id="login-tab" class="tab-content active">
             <form id="login-form">
                 <div class="form-group">
-                    <label for="login-username">Username</label>
-                    <input type="text" id="login-username" required>
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-control" id="login-username" required>
                 </div>
                 <div class="form-group">
-                    <label for="login-password">Password</label>
-                    <input type="password" id="login-password" required>
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-control" id="login-password" required>
                 </div>
                 <button type="submit" class="btn">Login</button>
             </form>
         </div>
-        
-        <!-- Register Form -->
+
         <div id="register-tab" class="tab-content">
             <form id="register-form">
                 <div class="form-group">
-                    <label for="register-username">Username</label>
-                    <input type="text" id="register-username" required minlength="3">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-control" id="register-username" required minlength="3">
                 </div>
                 <div class="form-group">
-                    <label for="register-email">Email</label>
-                    <input type="email" id="register-email" required>
+                    <label class="form-label">Email</label>
+                    <input type="email" class="form-control" id="register-email" required>
                 </div>
                 <div class="form-group">
-                    <label for="register-password">Password</label>
-                    <input type="password" id="register-password" required minlength="6">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-control" id="register-password" required minlength="6">
                 </div>
                 <div class="form-group">
-                    <label for="register-confirm-password">Confirm Password</label>
-                    <input type="password" id="register-confirm-password" required>
+                    <label class="form-label">Confirm Password</label>
+                    <input type="password" class="form-control" id="register-confirm-password" required>
                 </div>
                 <button type="submit" class="btn">Register</button>
             </form>
-        </div>
-        
-        <div class="footer">
-            <p>Game Panel v1.0</p>
         </div>
     </div>
 
     <script>
         function switchTab(tabName) {
-            // Update tabs
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.classList.remove('active');
-            });
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
             
-            // Activate selected tab
             event.target.classList.add('active');
             document.getElementById(tabName + '-tab').classList.add('active');
-            
-            // Clear messages
             hideMessage();
         }
-        
+
         function showMessage(text, type) {
             const messageEl = document.getElementById('message');
             messageEl.textContent = text;
             messageEl.className = 'message ' + type;
             messageEl.style.display = 'block';
         }
-        
+
         function hideMessage() {
             document.getElementById('message').style.display = 'none';
         }
-        
-        // Login form handler
+
         document.getElementById('login-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -294,9 +1117,7 @@ create_web_interface() {
             try {
                 const response = await fetch('/api/auth/login', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ username, password })
                 });
                 
@@ -304,16 +1125,15 @@ create_web_interface() {
                 
                 if (data.success) {
                     localStorage.setItem('session_token', data.session_token);
-                    window.location.href = '/dashboard.html';
+                    window.location.href = '/';
                 } else {
                     showMessage(data.message, 'error');
                 }
             } catch (error) {
-                showMessage('Network error: ' + error, 'error');
+                showMessage('Network error', 'error');
             }
         });
-        
-        // Register form handler
+
         document.getElementById('register-form').addEventListener('submit', async (e) => {
             e.preventDefault();
             
@@ -330,9 +1150,7 @@ create_web_interface() {
             try {
                 const response = await fetch('/api/auth/register', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
+                    headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ username, email, password })
                 });
                 
@@ -346,567 +1164,13 @@ create_web_interface() {
                     showMessage(data.message, 'error');
                 }
             } catch (error) {
-                showMessage('Network error: ' + error, 'error');
+                showMessage('Network error', 'error');
             }
         });
-        
-        // Check if already logged in
+
         if (localStorage.getItem('session_token')) {
-            window.location.href = '/dashboard.html';
+            window.location.href = '/';
         }
-    </script>
-</body>
-</html>
-EOF
-
-    # Strona główna/dashboard
-    cat > "$WEB_DIR/dashboard.html" << 'EOF'
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Game Panel - Dashboard</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
-            min-height: 100vh;
-        }
-        
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-        
-        .header {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 15px;
-            margin-bottom: 20px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        
-        .user-info {
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        
-        .logout-btn {
-            padding: 8px 16px;
-            background: #f56565;
-            color: white;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        
-        .servers-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 20px;
-            margin-bottom: 20px;
-        }
-        
-        .server-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 25px;
-            border-radius: 15px;
-            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.1);
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-        
-        .server-card:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
-        }
-        
-        .server-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 15px;
-        }
-        
-        .server-icon {
-            font-size: 2em;
-        }
-        
-        .status {
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.85em;
-            font-weight: 600;
-        }
-        
-        .status-running {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-        
-        .status-stopped {
-            background: #fed7d7;
-            color: #742a2a;
-        }
-        
-        .server-info {
-            margin-bottom: 20px;
-        }
-        
-        .info-item {
-            display: flex;
-            justify-content: space-between;
-            padding: 8px 0;
-            border-bottom: 1px solid #e2e8f0;
-        }
-        
-        .controls {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-        
-        .btn {
-            padding: 12px 20px;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-align: center;
-            text-decoration: none;
-            display: inline-block;
-        }
-        
-        .btn-start {
-            background: #48bb78;
-            color: white;
-        }
-        
-        .btn-stop {
-            background: #f56565;
-            color: white;
-        }
-        
-        .btn-restart {
-            background: #ed8936;
-            color: white;
-        }
-        
-        .btn-console {
-            background: #4299e1;
-            color: white;
-        }
-        
-        .btn:hover {
-            opacity: 0.9;
-            transform: translateY(-2px);
-        }
-        
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 15px;
-            margin-bottom: 20px;
-        }
-        
-        .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 20px;
-            border-radius: 12px;
-            text-align: center;
-            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-        }
-        
-        .stat-value {
-            font-size: 2em;
-            font-weight: bold;
-            color: #4a5568;
-        }
-        
-        .stat-label {
-            color: #718096;
-            font-size: 0.9em;
-        }
-        
-        .console {
-            background: #1a202c;
-            color: #cbd5e0;
-            padding: 20px;
-            border-radius: 8px;
-            font-family: 'Courier New', monospace;
-            height: 300px;
-            overflow-y: auto;
-            margin-bottom: 20px;
-        }
-        
-        .log-entry {
-            margin-bottom: 5px;
-        }
-        
-        .timestamp {
-            color: #718096;
-        }
-        
-        @media (max-width: 768px) {
-            .servers-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .controls {
-                grid-template-columns: 1fr;
-            }
-            
-            .header {
-                flex-direction: column;
-                gap: 15px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🕹️ Game Control Panel</h1>
-            <div class="user-info">
-                <span>Welcome, <strong id="username">User</strong></span>
-                <button class="logout-btn" onclick="logout()">Logout</button>
-            </div>
-        </div>
-
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-value" id="cpu-usage">--%</div>
-                <div class="stat-label">CPU Usage</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="memory-usage">--%</div>
-                <div class="stat-label">Memory Usage</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="active-servers">0</div>
-                <div class="stat-label">Active Servers</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="total-servers">3</div>
-                <div class="stat-label">Total Servers</div>
-            </div>
-        </div>
-
-        <div class="servers-grid">
-            <!-- FiveM Server Card -->
-            <div class="server-card">
-                <div class="server-header">
-                    <div>
-                        <div class="server-icon">🚗</div>
-                        <h3>FiveM Server</h3>
-                    </div>
-                    <span class="status status-running" id="fivem-status">RUNNING</span>
-                </div>
-                <div class="server-info">
-                    <div class="info-item">
-                        <span>Port:</span>
-                        <span>30120</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Players:</span>
-                        <span id="fivem-players">0/32</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Uptime:</span>
-                        <span id="fivem-uptime">--</span>
-                    </div>
-                </div>
-                <div class="controls">
-                    <button class="btn btn-stop" onclick="controlServer('fivem', 'stop')">Stop</button>
-                    <button class="btn btn-restart" onclick="controlServer('fivem', 'restart')">Restart</button>
-                    <button class="btn btn-console" onclick="showConsole('fivem')">Console</button>
-                    <button class="btn btn-start" onclick="controlServer('fivem', 'start')" style="display:none">Start</button>
-                </div>
-            </div>
-
-            <!-- Minecraft Server Card -->
-            <div class="server-card">
-                <div class="server-header">
-                    <div>
-                        <div class="server-icon">⛏️</div>
-                        <h3>Minecraft Server</h3>
-                    </div>
-                    <span class="status status-running" id="minecraft-status">RUNNING</span>
-                </div>
-                <div class="server-info">
-                    <div class="info-item">
-                        <span>Port:</span>
-                        <span>25565</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Players:</span>
-                        <span id="minecraft-players">0/20</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Version:</span>
-                        <span>1.20.1</span>
-                    </div>
-                </div>
-                <div class="controls">
-                    <button class="btn btn-stop" onclick="controlServer('minecraft', 'stop')">Stop</button>
-                    <button class="btn btn-restart" onclick="controlServer('minecraft', 'restart')">Restart</button>
-                    <button class="btn btn-console" onclick="showConsole('minecraft')">Console</button>
-                    <button class="btn btn-start" onclick="controlServer('minecraft', 'start')" style="display:none">Start</button>
-                </div>
-            </div>
-
-            <!-- Discord Bot Card -->
-            <div class="server-card">
-                <div class="server-header">
-                    <div>
-                        <div class="server-icon">🤖</div>
-                        <h3>Discord Bot</h3>
-                    </div>
-                    <span class="status status-running" id="discord-status">RUNNING</span>
-                </div>
-                <div class="server-info">
-                    <div class="info-item">
-                        <span>Commands:</span>
-                        <span>!status, !servers</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Uptime:</span>
-                        <span id="discord-uptime">--</span>
-                    </div>
-                    <div class="info-item">
-                        <span>Mode:</span>
-                        <span id="discord-mode">Online</span>
-                    </div>
-                </div>
-                <div class="controls">
-                    <button class="btn btn-stop" onclick="controlServer('discord', 'stop')">Stop</button>
-                    <button class="btn btn-restart" onclick="controlServer('discord', 'restart')">Restart</button>
-                    <button class="btn btn-console" onclick="showConsole('discord')">Console</button>
-                    <button class="btn btn-start" onclick="controlServer('discord', 'start')" style="display:none">Start</button>
-                </div>
-            </div>
-        </div>
-
-        <div class="server-card">
-            <h3>📊 Server Console</h3>
-            <div class="console" id="console-output">
-                <div class="log-entry">
-                    <span class="timestamp">[12:00:00]</span> System: Panel initialized
-                </div>
-            </div>
-            <div style="display: flex; gap: 10px;">
-                <input type="text" id="console-input" placeholder="Enter command..." style="flex: 1; padding: 10px; border: 1px solid #cbd5e0; border-radius: 5px;">
-                <button class="btn btn-console" onclick="sendCommand()">Send</button>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // Check authentication
-        const sessionToken = localStorage.getItem('session_token');
-        if (!sessionToken) {
-            window.location.href = '/login.html';
-        }
-
-        // Load user info
-        async function loadUserInfo() {
-            try {
-                const response = await fetch('/api/auth/me', {
-                    headers: {
-                        'Authorization': 'Bearer ' + sessionToken
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Not authenticated');
-                }
-                
-                const data = await response.json();
-                document.getElementById('username').textContent = data.username;
-            } catch (error) {
-                logout();
-            }
-        }
-
-        function logout() {
-            localStorage.removeItem('session_token');
-            window.location.href = '/login.html';
-        }
-
-        // Update stats periodically
-        async function updateStats() {
-            try {
-                const response = await fetch('/api/stats', {
-                    headers: {
-                        'Authorization': 'Bearer ' + sessionToken
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Not authenticated');
-                }
-                
-                const data = await response.json();
-                document.getElementById('cpu-usage').textContent = data.cpu + '%';
-                document.getElementById('memory-usage').textContent = data.memory + '%';
-                document.getElementById('active-servers').textContent = data.active_servers;
-                
-                // Update server statuses
-                updateServerStatus('fivem', data.servers.fivem);
-                updateServerStatus('minecraft', data.servers.minecraft);
-                updateServerStatus('discord', data.servers.discord);
-            } catch (error) {
-                console.error('Error fetching stats:', error);
-                if (error.message === 'Not authenticated') {
-                    logout();
-                }
-            }
-        }
-        
-        function updateServerStatus(server, data) {
-            const statusElement = document.getElementById(server + '-status');
-            const startBtn = document.querySelector(`[onclick="controlServer('${server}', 'start')"]`);
-            const stopBtn = document.querySelector(`[onclick="controlServer('${server}', 'stop')"]`);
-            
-            if (data.status === 'running') {
-                statusElement.textContent = 'RUNNING';
-                statusElement.className = 'status status-running';
-                startBtn.style.display = 'none';
-                stopBtn.style.display = 'block';
-            } else {
-                statusElement.textContent = 'STOPPED';
-                statusElement.className = 'status status-stopped';
-                startBtn.style.display = 'block';
-                stopBtn.style.display = 'none';
-            }
-            
-            if (server === 'fivem' && data.players !== undefined) {
-                document.getElementById('fivem-players').textContent = data.players + '/32';
-            }
-            
-            if (data.uptime) {
-                document.getElementById(server + '-uptime').textContent = data.uptime;
-            }
-        }
-        
-        async function controlServer(server, action) {
-            try {
-                const response = await fetch('/api/control', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': 'Bearer ' + sessionToken
-                    },
-                    body: JSON.stringify({
-                        server: server,
-                        action: action
-                    })
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Not authenticated');
-                }
-                
-                const data = await response.json();
-                addLog(`Server ${server}: ${action} command sent`);
-                updateStats();
-            } catch (error) {
-                addLog(`Error: ${error}`);
-                if (error.message === 'Not authenticated') {
-                    logout();
-                }
-            }
-        }
-        
-        async function showConsole(server) {
-            try {
-                const response = await fetch(`/api/console/${server}`, {
-                    headers: {
-                        'Authorization': 'Bearer ' + sessionToken
-                    }
-                });
-                
-                if (!response.ok) {
-                    throw new Error('Not authenticated');
-                }
-                
-                const data = await response.json();
-                const consoleOutput = document.getElementById('console-output');
-                consoleOutput.innerHTML = '';
-                data.logs.forEach(log => {
-                    addLog(log, false);
-                });
-            } catch (error) {
-                if (error.message === 'Not authenticated') {
-                    logout();
-                }
-            }
-        }
-        
-        async function sendCommand() {
-            const input = document.getElementById('console-input');
-            const command = input.value.trim();
-            if (command) {
-                addLog(`> ${command}`);
-                input.value = '';
-                
-                try {
-                    await fetch('/api/command', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Authorization': 'Bearer ' + sessionToken
-                        },
-                        body: JSON.stringify({
-                            command: command
-                        })
-                    });
-                } catch (error) {
-                    console.error('Error sending command:', error);
-                }
-            }
-        }
-        
-        function addLog(message, scroll = true) {
-            const consoleOutput = document.getElementById('console-output');
-            const timestamp = new Date().toLocaleTimeString();
-            const logEntry = document.createElement('div');
-            logEntry.className = 'log-entry';
-            logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> ${message}`;
-            consoleOutput.appendChild(logEntry);
-            
-            if (scroll) {
-                consoleOutput.scrollTop = consoleOutput.scrollHeight;
-            }
-        }
-        
-        // Initialize
-        loadUserInfo();
-        setInterval(updateStats, 2000);
-        updateStats();
-        
-        // Handle Enter key in console input
-        document.getElementById('console-input').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                sendCommand();
-            }
-        });
     </script>
 </body>
 </html>
@@ -916,7 +1180,7 @@ EOF
 }
 
 create_api_scripts() {
-    # Główny skrypt API w Pythonie z autentykacją
+    # Rozszerzony skrypt API
     cat > "$WEB_DIR/api.py" << 'EOF'
 #!/usr/bin/env python3
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -924,12 +1188,11 @@ import json
 import os
 import subprocess
 import time
-import threading
-from datetime import datetime
+import sqlite3
 import hashlib
 import secrets
-import sqlite3
-import urllib.parse
+from datetime import datetime, timedelta
+import threading
 
 PANEL_DIR = os.path.expanduser("~/game-panel")
 LOG_DIR = os.path.join(PANEL_DIR, "logs")
@@ -939,26 +1202,21 @@ DB_FILE = os.path.join(PANEL_DIR, "database", "panel.db")
 class GamePanelHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/':
-            self.serve_file('login.html')
+            self.serve_file('index.html')
         elif self.path == '/login.html':
             self.serve_file('login.html')
-        elif self.path == '/dashboard.html':
+        elif self.path.startswith('/api/'):
             if not self.authenticate():
                 return
-            self.serve_file('dashboard.html')
-        elif self.path == '/api/stats':
-            if not self.authenticate():
-                return
-            self.serve_stats()
-        elif self.path.startswith('/api/console/'):
-            if not self.authenticate():
-                return
-            server = self.path.split('/')[-1]
-            self.serve_console(server)
-        elif self.path == '/api/auth/me':
-            if not self.authenticate():
-                return
-            self.serve_user_info()
+            
+            if self.path == '/api/stats':
+                self.serve_stats()
+            elif self.path == '/api/servers':
+                self.serve_user_servers()
+            elif self.path == '/api/auth/me':
+                self.serve_user_info()
+            else:
+                self.send_error(404)
         else:
             self.serve_file(self.path[1:])
     
@@ -967,18 +1225,23 @@ class GamePanelHandler(BaseHTTPRequestHandler):
             self.handle_login()
         elif self.path == '/api/auth/register':
             self.handle_register()
-        elif self.path == '/api/control':
+        elif self.path.startswith('/api/'):
             if not self.authenticate():
                 return
-            self.handle_control()
-        elif self.path == '/api/command':
-            if not self.authenticate():
-                return
-            self.handle_command()
+            
+            if self.path == '/api/servers/create':
+                self.handle_create_server()
+            elif self.path == '/api/servers/control':
+                self.handle_control_server()
+            else:
+                self.send_error(404)
         else:
             self.send_error(404)
     
     def authenticate(self):
+        if self.path in ['/api/auth/login', '/api/auth/register']:
+            return True
+            
         auth_header = self.headers.get('Authorization')
         if not auth_header or not auth_header.startswith('Bearer '):
             self.send_auth_error()
@@ -997,28 +1260,13 @@ class GamePanelHandler(BaseHTTPRequestHandler):
     def validate_session(self, token):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
-        cursor.execute('''
-            SELECT user_id FROM sessions 
-            WHERE token = ? AND expires_at > datetime('now')
-        ''', (token,))
-        
+        cursor.execute('SELECT user_id FROM sessions WHERE token = ? AND expires_at > datetime("now")', (token,))
         result = cursor.fetchone()
         conn.close()
-        
         return result[0] if result else None
-    
-    def send_auth_error(self):
-        self.send_response(401)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
-        self.wfile.write(json.dumps({"success": False, "message": "Authentication required"}).encode('utf-8'))
     
     def serve_file(self, filename):
         try:
-            if filename == '':
-                filename = 'login.html'
-                
             filepath = os.path.join(PANEL_DIR, 'web', filename)
             if os.path.exists(filepath):
                 with open(filepath, 'rb') as f:
@@ -1048,81 +1296,52 @@ class GamePanelHandler(BaseHTTPRequestHandler):
             "cpu": self.get_cpu_usage(),
             "memory": self.get_memory_usage(),
             "active_servers": self.get_active_servers_count(),
-            "total_servers": 3,
-            "servers": {
-                "fivem": self.get_server_status("fivem"),
-                "minecraft": self.get_server_status("minecraft"),
-                "discord": self.get_server_status("discord")
-            }
+            "total_servers": self.get_total_servers_count()
         }
-        
         self.send_json_response(stats)
     
-    def serve_console(self, server):
-        log_file = os.path.join(LOG_DIR, f"{server}.log")
-        logs = []
-        if os.path.exists(log_file):
-            with open(log_file, 'r') as f:
-                logs = f.readlines()[-50:]  # Last 50 lines
-        self.send_json_response({"logs": logs})
+    def serve_user_servers(self):
+        servers = self.get_user_servers()
+        self.send_json_response(servers)
     
     def serve_user_info(self):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
-        cursor.execute('SELECT username FROM users WHERE id = ?', (self.user_id,))
+        cursor.execute('SELECT username, email FROM users WHERE id = ?', (self.user_id,))
         user = cursor.fetchone()
         conn.close()
         
         if user:
-            self.send_json_response({"username": user[0]})
+            self.send_json_response({"username": user[0], "email": user[1]})
         else:
             self.send_auth_error()
     
     def handle_login(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
-        
+        data = self.get_post_data()
         username = data.get('username')
         password = data.get('password')
         
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
-        
         cursor.execute('SELECT id, password_hash FROM users WHERE username = ?', (username,))
         user = cursor.fetchone()
         
         if user and self.verify_password(password, user[1]):
-            # Create session
             token = secrets.token_hex(32)
-            expires_at = datetime.now().timestamp() + (24 * 60 * 60)  # 24 hours
+            expires_at = datetime.now() + timedelta(hours=24)
             
-            cursor.execute('''
-                INSERT INTO sessions (user_id, token, expires_at)
-                VALUES (?, ?, datetime(?, 'unixepoch'))
-            ''', (user[0], token, expires_at))
-            
+            cursor.execute('INSERT INTO sessions (user_id, token, expires_at) VALUES (?, ?, ?)',
+                         (user[0], token, expires_at))
             conn.commit()
             conn.close()
             
-            self.send_json_response({
-                "success": True,
-                "message": "Login successful",
-                "session_token": token
-            })
+            self.send_json_response({"success": True, "message": "Login successful", "session_token": token})
         else:
             conn.close()
-            self.send_json_response({
-                "success": False,
-                "message": "Invalid username or password"
-            })
+            self.send_json_response({"success": False, "message": "Invalid credentials"})
     
     def handle_register(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
-        
+        data = self.get_post_data()
         username = data.get('username')
         email = data.get('email')
         password = data.get('password')
@@ -1130,54 +1349,186 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         conn = sqlite3.connect(DB_FILE)
         cursor = conn.cursor()
         
-        # Check if user exists
         cursor.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
         if cursor.fetchone():
             conn.close()
-            self.send_json_response({
-                "success": False,
-                "message": "Username or email already exists"
-            })
+            self.send_json_response({"success": False, "message": "User already exists"})
             return
         
-        # Create user
         password_hash = self.hash_password(password)
-        cursor.execute('''
-            INSERT INTO users (username, email, password_hash, created_at)
-            VALUES (?, ?, ?, datetime('now'))
-        ''', (username, email, password_hash))
-        
+        cursor.execute('INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
+                     (username, email, password_hash, datetime.now()))
         conn.commit()
         conn.close()
         
-        self.send_json_response({
-            "success": True,
-            "message": "Registration successful"
-        })
+        self.send_json_response({"success": True, "message": "Registration successful"})
     
-    def handle_control(self):
-        content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
+    def handle_create_server(self):
+        data = self.get_post_data()
+        server_name = data.get('name')
+        server_type = data.get('type')
+        resources = data.get('resources', {})
+        version = data.get('version')
         
-        server = data.get('server')
+        # Create server in database
+        server_id = self.create_server_in_db(server_name, server_type, resources, version)
+        
+        # Create server files and start script
+        self.create_server_files(server_id, server_name, server_type, resources, version)
+        
+        server_info = {
+            "id": server_id,
+            "name": server_name,
+            "type": server_type,
+            "status": "stopped",
+            "resources": resources,
+            "version": version
+        }
+        
+        self.send_json_response(server_info)
+    
+    def handle_control_server(self):
+        data = self.get_post_data()
+        server_id = data.get('server_id')
         action = data.get('action')
         
-        # Execute control action
-        result = self.control_server(server, action)
-        self.send_json_response({"status": "success", "result": result})
+        result = self.control_server(server_id, action)
+        self.send_json_response({"success": True, "message": result})
     
-    def handle_command(self):
+    def create_server_in_db(self, name, type, resources, version):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            INSERT INTO servers (user_id, name, type, resources, version, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (self.user_id, name, type, json.dumps(resources), version, 'stopped', datetime.now()))
+        
+        server_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return server_id
+    
+    def create_server_files(self, server_id, name, type, resources, version):
+        server_path = os.path.join(SERVER_DIR, type, f"server_{server_id}")
+        os.makedirs(server_path, exist_ok=True)
+        
+        # Create start script based on server type
+        start_script = self.generate_start_script(type, resources, version)
+        
+        with open(os.path.join(server_path, 'start.sh'), 'w') as f:
+            f.write(start_script)
+        
+        os.chmod(os.path.join(server_path, 'start.sh'), 0o755)
+        
+        # Create server configuration
+        config = {
+            "id": server_id,
+            "name": name,
+            "type": type,
+            "resources": resources,
+            "version": version,
+            "port": self.get_available_port()
+        }
+        
+        with open(os.path.join(server_path, 'config.json'), 'w') as f:
+            json.dump(config, f, indent=2)
+    
+    def generate_start_script(self, server_type, resources, version):
+        cpu_limit = resources.get('cpu', 1)
+        memory_limit = resources.get('memory', 512)
+        
+        scripts = {
+            'fivem': f'''#!/bin/bash
+echo "Starting FiveM Server with {cpu_limit} CPU cores and {memory_limit}MB RAM"
+cd $(dirname "$0")
+# FiveM server start command would go here
+while true; do
+    echo "[$(date)] FiveM Server running - Players: 0/{resources.get('memory', 32) // 64}"
+    sleep 30
+done
+''',
+            'minecraft': f'''#!/bin/bash
+echo "Starting Minecraft Server with {cpu_limit} CPU cores and {memory_limit}MB RAM"
+cd $(dirname "$0")
+java -Xmx{memory_limit}M -Xms{max(512, memory_limit // 2)}M -jar server.jar nogui
+''',
+            'python': f'''#!/bin/bash
+echo "Starting Python App with {cpu_limit} CPU cores and {memory_limit}MB RAM"
+cd $(dirname "$0")
+python{version} app.py
+''',
+            'node': f'''#!/bin/bash
+echo "Starting Node.js App with {cpu_limit} CPU cores and {memory_limit}MB RAM"
+cd $(dirname "$0")
+npm start
+'''
+        }
+        
+        return scripts.get(server_type, 'echo "Unknown server type"')
+    
+    def control_server(self, server_id, action):
+        # Get server info
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('SELECT type, name FROM servers WHERE id = ? AND user_id = ?', (server_id, self.user_id))
+        server = cursor.fetchone()
+        
+        if not server:
+            conn.close()
+            return "Server not found"
+        
+        server_type, server_name = server
+        
+        # Update server status
+        cursor.execute('UPDATE servers SET status = ? WHERE id = ?', (action if action != 'restart' else 'running', server_id))
+        conn.commit()
+        conn.close()
+        
+        # Execute control action
+        server_path = os.path.join(SERVER_DIR, server_type, f"server_{server_id}")
+        
+        if action == 'start':
+            subprocess.Popen(['screen', '-dmS', f'server_{server_id}', 'bash', os.path.join(server_path, 'start.sh')])
+            return f"Server {server_name} started"
+        elif action == 'stop':
+            subprocess.run(['screen', '-S', f'server_{server_id}', '-X', 'quit'])
+            return f"Server {server_name} stopped"
+        elif action == 'restart':
+            subprocess.run(['screen', '-S', f'server_{server_id}', '-X', 'quit'])
+            time.sleep(2)
+            subprocess.Popen(['screen', '-dmS', f'server_{server_id}', 'bash', os.path.join(server_path, 'start.sh')])
+            return f"Server {server_name} restarted"
+    
+    def get_user_servers(self):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, name, type, resources, status, version 
+            FROM servers WHERE user_id = ?
+        ''', (self.user_id,))
+        
+        servers = []
+        for row in cursor.fetchall():
+            servers.append({
+                "id": row[0],
+                "name": row[1],
+                "type": row[2],
+                "resources": json.loads(row[3]),
+                "status": row[4],
+                "version": row[5]
+            })
+        
+        conn.close()
+        return servers
+    
+    def get_available_port(self):
+        # Simple port assignment - in production this would be more sophisticated
+        return 30000 + len(self.get_user_servers())
+    
+    def get_post_data(self):
         content_length = int(self.headers['Content-Length'])
-        post_data = self.rfile.read(content_length)
-        data = json.loads(post_data.decode('utf-8'))
-        
-        command = data.get('command')
-        # Log the command
-        with open(os.path.join(LOG_DIR, "commands.log"), "a") as f:
-            f.write(f"[{datetime.now()}] Command: {command}\n")
-        
-        self.send_json_response({"status": "received"})
+        return json.loads(self.rfile.read(content_length).decode('utf-8'))
     
     def send_json_response(self, data):
         self.send_response(200)
@@ -1186,34 +1537,30 @@ class GamePanelHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(json.dumps(data).encode('utf-8'))
     
+    def send_auth_error(self):
+        self.send_response(401)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        self.wfile.write(json.dumps({"success": False, "message": "Authentication required"}).encode('utf-8'))
+    
     def log_message(self, format, *args):
-        # Disable default logging
         pass
     
-    def hash_password(self, password):
-        return hashlib.sha256(password.encode()).hexdigest()
-    
-    def verify_password(self, password, password_hash):
-        return self.hash_password(password) == password_hash
-    
-    # System monitoring functions
+    # System monitoring
     def get_cpu_usage(self):
         try:
             result = subprocess.run(['mpstat', '1', '1'], capture_output=True, text=True)
-            lines = result.stdout.split('\n')
-            for line in lines:
+            for line in result.stdout.split('\\n'):
                 if 'all' in line:
-                    parts = line.split()
-                    idle = float(parts[-1])
-                    return round(100 - idle, 1)
+                    return round(100 - float(line.split()[-1]), 1)
         except:
             pass
-        return round(20.5, 1)  # Fallback
+        return round(15.5, 1)
     
     def get_memory_usage(self):
         try:
             result = subprocess.run(['free'], capture_output=True, text=True)
-            lines = result.stdout.split('\n')
+            lines = result.stdout.split('\\n')
             if len(lines) >= 2:
                 parts = lines[1].split()
                 total = int(parts[1])
@@ -1221,43 +1568,29 @@ class GamePanelHandler(BaseHTTPRequestHandler):
                 return round((used / total) * 100, 1)
         except:
             pass
-        return round(45.2, 1)  # Fallback
+        return round(42.3, 1)
     
     def get_active_servers_count(self):
-        count = 0
-        servers = ["fivem", "minecraft", "discord"]
-        for server in servers:
-            if self.is_server_running(server):
-                count += 1
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM servers WHERE status = 'running' AND user_id = ?", (self.user_id,))
+        count = cursor.fetchone()[0]
+        conn.close()
         return count
     
-    def get_server_status(self, server):
-        status = {
-            "status": "running" if self.is_server_running(server) else "stopped",
-            "uptime": "2h 30m",
-            "players": 0
-        }
-        
-        if server == "fivem":
-            status["players"] = 3
-        elif server == "minecraft":
-            status["players"] = 2
-        
-        return status
+    def get_total_servers_count(self):
+        conn = sqlite3.connect(DB_FILE)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM servers WHERE user_id = ?", (self.user_id,))
+        count = cursor.fetchone()[0]
+        conn.close()
+        return count
     
-    def is_server_running(self, server):
-        try:
-            result = subprocess.run(['screen', '-list'], capture_output=True, text=True)
-            return server in result.stdout
-        except:
-            return False
+    def hash_password(self, password):
+        return hashlib.sha256(password.encode()).hexdigest()
     
-    def control_server(self, server, action):
-        script_path = os.path.join(PANEL_DIR, "scripts", f"{server}_{action}.sh")
-        if os.path.exists(script_path):
-            subprocess.Popen(['bash', script_path])
-            return f"{action} command sent to {server}"
-        return f"No script found for {server} {action}"
+    def verify_password(self, password, password_hash):
+        return self.hash_password(password) == password_hash
 
 def init_database():
     os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
@@ -1265,7 +1598,6 @@ def init_database():
     conn = sqlite3.connect(DB_FILE)
     cursor = conn.cursor()
     
-    # Create users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1276,7 +1608,6 @@ def init_database():
         )
     ''')
     
-    # Create sessions table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1288,250 +1619,174 @@ def init_database():
         )
     ''')
     
-    # Create default admin user if not exists
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS servers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            name TEXT NOT NULL,
+            type TEXT NOT NULL,
+            resources TEXT NOT NULL,
+            version TEXT,
+            status TEXT DEFAULT 'stopped',
+            created_at DATETIME NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )
+    ''')
+    
+    # Create default admin user
     cursor.execute('SELECT id FROM users WHERE username = ?', ('admin',))
     if not cursor.fetchone():
-        import hashlib
         password_hash = hashlib.sha256('admin123'.encode()).hexdigest()
-        cursor.execute('''
-            INSERT INTO users (username, email, password_hash, created_at)
-            VALUES (?, ?, ?, datetime('now'))
-        ''', ('admin', 'admin@localhost', password_hash))
+        cursor.execute(
+            'INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
+            ('admin', 'admin@localhost', password_hash, datetime.now())
+        )
     
     conn.commit()
     conn.close()
 
-def start_web_server():
+def start_nginx():
+    print("🌐 Starting Nginx...")
+    nginx_config = os.path.expanduser("~/game-panel/nginx/nginx.conf")
+    subprocess.Popen(['nginx', '-c', nginx_config, '-p', os.path.expanduser("~/game-panel/nginx")])
+
+def start_panel():
     init_database()
+    start_nginx()
     
     port = 8080
     server = HTTPServer(('0.0.0.0', port), GamePanelHandler)
-    print(f"🌐 Game Panel dostępny pod: http://0.0.0.0:{port}")
-    print(f"🔐 Login: admin / admin123")
-    print(f"📱 Dostęp z zewnątrz: http://your-codespace-url:{port}")
+    print(f"🎮 Panel API running on port {port}")
+    print(f"🌐 Web interface available on port 80")
+    print(f"🔐 Default login: admin / admin123")
     server.serve_forever()
 
 if __name__ == '__main__':
-    start_web_server()
+    start_panel()
 EOF
 
-    # Skrypty kontroli serwerów
-    mkdir -p "$PANEL_DIR/scripts"
-    
-    # FiveM scripts - prawdziwy serwer
-    cat > "$PANEL_DIR/scripts/fivem_start.sh" << 'EOF'
-#!/bin/bash
-echo "Starting FiveM server..."
-cd ~/game-panel/servers/fivem
-
-# Sprawdź czy serwer jest już pobrany
-if [ ! -f "run.sh" ]; then
-    echo "❌ FiveM server not installed. Run './game-panel.sh install-fivem' first."
-    exit 1
-fi
-
-# Uruchom serwer w screen
-screen -dmS fivem bash -c "./run.sh 2>&1 | tee ~/game-panel/logs/fivem.log"
-echo "✅ FiveM server started in screen session 'fivem'"
-echo "📋 Use 'screen -r fivem' to view console"
-EOF
-
-    cat > "$PANEL_DIR/scripts/fivem_stop.sh" << 'EOF'
-#!/bin/bash
-echo "Stopping FiveM server..."
-screen -S fivem -X stuff "^C"
-sleep 5
-screen -S fivem -X quit
-echo "✅ FiveM server stopped"
-EOF
-
-    # Minecraft scripts
-    cat > "$PANEL_DIR/scripts/minecraft_start.sh" << 'EOF'
-#!/bin/bash
-echo "Starting Minecraft server..."
-cd ~/game-panel/servers/minecraft
-
-if [ ! -f "server.jar" ]; then
-    echo "⚠️ Downloading Minecraft server..."
-    wget -q -O server.jar \
-        "https://piston-data.mojang.com/v1/objects/8dd1a28015f51b1803213892b50b7b4fc76e594d/server.jar"
-    echo "eula=true" > eula.txt
-fi
-
-screen -dmS minecraft bash -c "java -Xmx1G -Xms512M -jar server.jar nogui 2>&1 | tee ~/game-panel/logs/minecraft.log"
-echo "✅ Minecraft server started"
-EOF
-
-    cat > "$PANEL_DIR/scripts/minecraft_stop.sh" << 'EOF'
-#!/bin/bash
-echo "Stopping Minecraft server..."
-screen -S minecraft -X stuff "stop\n"
-sleep 10
-screen -S minecraft -X quit
-echo "✅ Minecraft server stopped"
-EOF
-
-    # Discord bot scripts
-    cat > "$PANEL_DIR/scripts/discord_start.sh" << 'EOF'
-#!/bin/bash
-echo "Starting Discord bot..."
-cd ~/game-panel/servers/discord-bot
-screen -dmS discord-bot bash -c "node bot.js 2>&1 | tee ~/game-panel/logs/discord.log"
-echo "✅ Discord bot started"
-EOF
-
-    cat > "$PANEL_DIR/scripts/discord_stop.sh" << 'EOF'
-#!/bin/bash
-echo "Stopping Discord bot..."
-screen -S discord-bot -X quit
-pkill -f "node.*bot.js"
-echo "✅ Discord bot stopped"
-EOF
-
-    chmod +x $PANEL_DIR/scripts/*.sh
-}
-
-install_fivem_server() {
-    echo -e "${PURPLE}🚗 Installing FiveM Server...${NC}"
-    
-    cd "$SERVER_DIR/fivem"
-    
-    # Pobierz artefakty FiveM
-    echo "📦 Downloading FiveM artifacts..."
-    wget -q "https://runtime.fivem.net/artifacts/fivem/build_proot_linux/master/22279-aa01d2b869bff4c28012065603eaf15541aa8fc4/fx.tar.xz"
-    
-    if [ $? -ne 0 ]; then
-        echo "❌ Failed to download FiveM server"
-        return 1
-    fi
-    
-    # Wypakuj
-    echo "📂 Extracting FiveM server..."
-    tar -xf fx.tar.xz
-    rm fx.tar.xz
-    
-    # Utwórz skrypt uruchamiania
-    cat > "run.sh" << 'EOF'
-#!/bin/bash
-echo "🚗 Starting FiveM Server..."
-./run.sh
-EOF
-
-    chmod +x run.sh
-    
-    # Keymaster configuration
-    cat > "keymaster.json" << 'EOF'
-{
-    "keymaster": "cfxk_1KQZ7kCqTxpTa0lahpVjF_Y8aNc"
-}
-EOF
-
-    echo "✅ FiveM server installed successfully!"
-    echo "🔑 Keymaster configured"
-    echo "🎮 Start the server from the web panel"
+    chmod +x "$WEB_DIR/api.py"
 }
 
 create_config_files() {
     echo -e "${YELLOW}📄 Tworzenie plików konfiguracyjnych...${NC}"
     
-    # Discord bot
-    cat > "$SERVER_DIR/discord-bot/bot.js" << 'EOF'
-const { Client, GatewayIntentBits } = require('discord.js');
+    # Przykładowe pliki dla różnych typów serwerów
+    cat > "$SERVER_DIR/python/app.py" << 'EOF'
+from flask import Flask
+import os
 
-console.log('🤖 Discord Bot starting...');
+app = Flask(__name__)
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages]
-});
+@app.route('/')
+def hello():
+    return f"Python App running on PID {os.getpid()}"
 
-client.once('ready', () => {
-    console.log(`✅ Bot ready: ${client.user.tag}`);
-    console.log('🕹️  Game Panel Bot is online!');
-});
-
-// Demo mode - don't actually login without token
-console.log('🔶 Running in demo mode');
-console.log('💡 Set DISCORD_BOT_TOKEN to connect to Discord');
-
-// Keep the process alive
-setInterval(() => {
-    console.log('🤖 Bot heartbeat...');
-}, 60000);
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=5000)
 EOF
 
-    cat > "$SERVER_DIR/discord-bot/package.json" << 'EOF'
+    cat > "$SERVER_DIR/node/package.json" << 'EOF'
 {
-    "name": "discord-bot",
+    "name": "node-app",
     "version": "1.0.0",
+    "scripts": {
+        "start": "node server.js"
+    },
     "dependencies": {
-        "discord.js": "^14.14.1"
+        "express": "^4.18.0"
     }
 }
 EOF
+
+    cat > "$SERVER_DIR/node/server.js" << 'EOF'
+const express = require('express');
+const app = express();
+const port = 3000;
+
+app.get('/', (req, res) => {
+    res.send('Node.js app is running!');
+});
+
+app.listen(port, () => {
+    console.log(`Server running on port ${port}`);
+});
+EOF
 }
 
-start_web_panel() {
-    echo -e "${GREEN}🌐 Uruchamianie panelu web na porcie $WEB_PORT...${NC}"
+init_database() {
+    echo -e "${YELLOW}🗃️ Inicjalizacja bazy danych...${NC}"
+    python3 "$WEB_DIR/api.py" &
+    sleep 2
+    pkill -f "api.py"
+}
+
+install_nginx() {
+    echo -e "${YELLOW}📦 Instalowanie Nginx...${NC}"
+    sudo apt-get update
+    sudo apt-get install -y nginx
     
-    # Sprawdź czy Python jest dostępny
-    if ! command -v python3 &> /dev/null; then
-        echo -e "${YELLOW}📦 Instalowanie Pythona...${NC}"
-        sudo apt-get update > /dev/null 2>&1
-        sudo apt-get install -y python3 python3-pip > /dev/null 2>&1
-    fi
+    # Zatrzymaj domyślny serwer Nginx
+    sudo systemctl stop nginx
+    sudo systemctl disable nginx
+}
+
+start_services() {
+    echo -e "${GREEN}🚀 Uruchamianie usług...${NC}"
     
-    # Sprawdź czy screen jest dostępny
-    if ! command -v screen &> /dev/null; then
-        echo -e "${YELLOW}📦 Instalowanie screen...${NC}"
-        sudo apt-get install -y screen > /dev/null 2>&1
-    fi
+    # Uruchom Nginx z naszej konfiguracji
+    nginx -c "$NGINX_DIR/nginx.conf" -p "$NGINX_DIR"
     
-    # Uruchom serwer web
+    # Uruchom panel API
     cd "$WEB_DIR"
     python3 api.py &
-    WEB_PID=$!
-    echo $WEB_PID > "$PANEL_DIR/web.pid"
+    echo $! > "$PANEL_DIR/api.pid"
     
-    echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
-    echo -e "${CYAN}📱 Adres: http://localhost:$WEB_PORT${NC}"
+    echo -e "${GREEN}✅ Usługi uruchomione!${NC}"
+    echo -e "${CYAN}🌐 Panel: http://localhost:80${NC}"
     echo -e "${CYAN}🔐 Login: admin / admin123${NC}"
-    echo -e "${CYAN}🌐 Public URL: Check Codespaces Ports tab${NC}"
 }
 
-stop_web_panel() {
-    if [ -f "$PANEL_DIR/web.pid" ]; then
-        kill $(cat "$PANEL_DIR/web.pid") 2>/dev/null
-        rm "$PANEL_DIR/web.pid"
-        echo -e "${GREEN}✅ Panel web zatrzymany${NC}"
+stop_services() {
+    echo -e "${YELLOW}🛑 Zatrzymywanie usług...${NC}"
+    
+    # Zatrzymaj Nginx
+    nginx -s stop -c "$NGINX_DIR/nginx.conf" -p "$NGINX_DIR" 2>/dev/null
+    
+    # Zatrzymaj API
+    if [ -f "$PANEL_DIR/api.pid" ]; then
+        kill $(cat "$PANEL_DIR/api.pid") 2>/dev/null
+        rm "$PANEL_DIR/api.pid"
     fi
+    
+    # Zatrzymaj wszystkie serwery w screen
+    screen -list | grep -oP 'server_[0-9]+' | while read session; do
+        screen -S "$session" -X quit
+    done
+    
+    echo -e "${GREEN}✅ Usługi zatrzymane${NC}"
 }
 
 show_status() {
     echo -e "${CYAN}=== 🎮 STATUS PANELU ===${NC}"
     
-    # Check web panel
-    if [ -f "$PANEL_DIR/web.pid" ] && kill -0 $(cat "$PANEL_DIR/web.pid") 2>/dev/null; then
-        echo -e "🌐 Web Panel: ${GREEN}RUNNING${NC} (port $WEB_PORT)"
+    # Sprawdź Nginx
+    if pgrep -f "nginx.*game-panel" > /dev/null; then
+        echo -e "🌐 Nginx: ${GREEN}RUNNING${NC} (port 80)"
     else
-        echo -e "🌐 Web Panel: ${RED}STOPPED${NC}"
+        echo -e "🌐 Nginx: ${RED}STOPPED${NC}"
     fi
     
-    # Check servers
-    servers=("fivem" "minecraft" "discord-bot")
-    for server in "${servers[@]}"; do
-        if screen -list | grep -q "$server"; then
-            echo -e "🎮 $server: ${GREEN}RUNNING${NC}"
-        else
-            echo -e "🎮 $server: ${RED}STOPPED${NC}"
-        fi
-    done
-    
-    # Check FiveM installation
-    if [ -f "$SERVER_DIR/fivem/run.sh" ]; then
-        echo -e "📦 FiveM: ${GREEN}INSTALLED${NC}"
+    # Sprawdź API
+    if [ -f "$PANEL_DIR/api.pid" ] && kill -0 $(cat "$PANEL_DIR/api.pid") 2>/dev/null; then
+        echo -e "🔌 Panel API: ${GREEN}RUNNING${NC}"
     else
-        echo -e "📦 FiveM: ${YELLOW}NOT INSTALLED${NC}"
+        echo -e "🔌 Panel API: ${RED}STOPPED${NC}"
     fi
+    
+    # Sprawdź serwery
+    server_count=$(screen -list | grep -c 'server_')
+    echo -e "🎮 Aktywne serwery: ${GREEN}$server_count${NC}"
 }
 
 main_menu() {
@@ -1539,53 +1794,57 @@ main_menu() {
         clear
         echo -e "${PURPLE}"
         echo -e "╔══════════════════════════════════════╗"
-        echo -e "║           🕹️ GAME PANEL            ║"
-        echo -e "║           Pterodactyl-like          ║"
-        echo -e "║        Authenticated System         ║"
+        echo -e "║           🕹️ PTERODACTYL PANEL     ║"
+        echo -e "║           Nginx Edition             ║"
         echo -e "╚══════════════════════════════════════╝"
         echo -e "${NC}"
         
         show_status
         echo ""
         
-        echo -e "${BLUE}1. 🚀 Start Web Panel${NC}"
-        echo -e "${BLUE}2. 🛑 Stop Web Panel${NC}"
+        echo -e "${BLUE}1. 🚀 Start Panel${NC}"
+        echo -e "${BLUE}2. 🛑 Stop Panel${NC}"
         echo -e "${BLUE}3. 🌐 Open in Browser${NC}"
-        echo -e "${BLUE}4. 🚗 Install FiveM Server${NC}"
-        echo -e "${BLUE}5. 🛠️  Reinstall Panel${NC}"
-        echo -e "${BLUE}6. 📊 Show Logs${NC}"
+        echo -e "${BLUE}4. 🛠️  Reinstall Panel${NC}"
+        echo -e "${BLUE}5. 📊 System Info${NC}"
         echo -e "${BLUE}0. ❌ Exit${NC}"
         echo ""
-        read -p "Wybierz opcję [0-6]: " choice
+        read -p "Wybierz opcję [0-5]: " choice
         
         case $choice in
             1)
                 if [ ! -d "$WEB_DIR" ]; then
+                    install_nginx
                     create_structure
                 fi
-                start_web_panel
+                start_services
                 ;;
             2)
-                stop_web_panel
+                stop_services
                 ;;
             3)
                 echo -e "${CYAN}🌐 Otwieranie przeglądarki...${NC}"
-                echo -e "${YELLOW}📋 Adres: http://localhost:$WEB_PORT${NC}"
+                echo -e "${YELLOW}📋 Adres: http://localhost${NC}"
                 echo -e "${GREEN}🔐 Login: admin / admin123${NC}"
                 ;;
             4)
-                install_fivem_server
+                echo -e "${YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
+                stop_services
+                rm -rf $PANEL_DIR
+                install_nginx
+                create_structure
+                start_services
                 ;;
             5)
-                echo -e "${YELLOW}🛠️  Przeinstalowywanie panelu...${NC}"
-                rm -rf $PANEL_DIR
-                create_structure
-                ;;
-            6)
-                tail -f $LOG_DIR/*.log
+                echo -e "${CYAN}=== 📊 SYSTEM INFORMATION ===${NC}"
+                free -h | awk 'NR==1{print "💾 " $0} NR==2{print "🔄 " $0}'
+                echo ""
+                df -h / | awk 'NR==2{print "💿 Disk: " $4 " free"}'
+                echo ""
+                echo "🌐 Public URL: Check Codespaces Ports tab"
                 ;;
             0)
-                stop_web_panel
+                stop_services
                 echo -e "${GREEN}👋 Do widzenia!${NC}"
                 exit 0
                 ;;
@@ -1600,17 +1859,15 @@ main_menu() {
 # Main execution
 case "$1" in
     "install")
+        install_nginx
         create_structure
-        start_web_panel
+        start_services
         ;;
     "start")
-        start_web_panel
+        start_services
         ;;
     "stop")
-        stop_web_panel
-        ;;
-    "install-fivem")
-        install_fivem_server
+        stop_services
         ;;
     *)
         main_menu
