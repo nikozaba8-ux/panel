@@ -239,7 +239,7 @@ start_web_server() {
                         sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
                         ;;
                 esac
-            "
+            " 2>/dev/null
         done
     } > /dev/null 2>&1 &
     
@@ -711,79 +711,180 @@ EOF
 }
 
 # =============================================
+# 🛑 FUNKCJA SPRZĄTAJĄCA
+# =============================================
+
+cleanup() {
+    echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
+    stop_web_server
+    echo -e "${GREEN}✅ Panel został zatrzymany${NC}"
+    exit 0
+}
+
+# =============================================
+# 🎯 FUNKCJE ZARZĄDZANIA PANELEM
+# =============================================
+
+show_status() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Panel jest uruchomiony (PID: $pid)${NC}"
+            
+            # Pobierz aktualne IP
+            local ips=$(get_server_ips)
+            local local_ip=$(echo "$ips" | cut -d'|' -f1)
+            local public_ip=$(echo "$ips" | cut -d'|' -f2)
+            
+            echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
+            echo -e "  Local:    http://$local_ip:$PORT"
+            if [ -n "$public_ip" ]; then
+                echo -e "  Public:   http://$public_ip:$PORT"
+            fi
+            echo -e "  Localhost: http://localhost:$PORT"
+        else
+            echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
+    fi
+}
+
+restart_panel() {
+    echo -e "${YELLOW}🔄 Restartowanie panelu...${NC}"
+    stop_web_server
+    sleep 2
+    start_web_server
+}
+
+backup_panel() {
+    local backup_name="panel-backup-$(date '+%Y-%m-%d-%H-%M-%S')"
+    local backup_path="$PANEL_BACKUP_DIR/$backup_name.tar.gz"
+    
+    echo -e "${YELLOW}📦 Tworzenie backupu panelu...${NC}"
+    
+    tar -czf "$backup_path" -C "$PANEL_DIR" . 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}✅ Backup utworzony: $backup_path${NC}"
+    else
+        echo -e "${RED}❌ Błąd podczas tworzenia backupu${NC}"
+    fi
+}
+
+show_help() {
+    echo -e "${GREEN}🦖 Panel Pterodactyl - Pomoc${NC}"
+    echo ""
+    echo -e "${CYAN}Dostępne komendy:${NC}"
+    echo -e "  ${YELLOW}start${NC}     - Uruchom panel"
+    echo -e "  ${YELLOW}stop${NC}      - Zatrzymaj panel"
+    echo -e "  ${YELLOW}restart${NC}   - Restartuj panel"
+    echo -e "  ${YELLOW}status${NC}    - Pokaż status panelu"
+    echo -e "  ${YELLOW}backup${NC}    - Utwórz backup panelu"
+    echo -e "  ${YELLOW}help${NC}      - Pokaż tę pomoc"
+    echo ""
+    echo -e "${CYAN}Przykłady:${NC}"
+    echo -e "  ${GREEN}sudo $0 start${NC}"
+    echo -e "  ${GREEN}sudo $0 status${NC}"
+    echo -e "  ${GREEN}sudo $0 backup${NC}"
+}
+
+# =============================================
 # 📜 MAIN SCRIPT - AUTO-IP
 # =============================================
 
-# Sprawdź czy to pierwsze uruchomienie
-if [ ! -d "$PANEL_DIR" ] || [ "$1" = "start" ]; then
-    # NATYCHMIASTOWE URUCHOMIENIE PANELU Z AUTO-IP
-    quick_initialize
-    
-    # Uruchom pełną pętlę serwera w tle
-    {
-        sleep 3
-        stop_web_server
-        
-        # Pełna wersja serwera z API i auto-IP
-        {
-            while true; do
-                nc -l -p $PORT -c "
-                    read -r request
-                    export REQUEST_URI=\$(echo \"\$request\" | awk '{print \$2}')
-                    export REQUEST_METHOD=\$(echo \"\$request\" | awk '{print \$1}')
-                    
-                    # Aktualizuj IP przy każdym żądaniu
-                    current_ips=\$(get_server_ips)
-                    current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
-                    current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
-                    
-                    if [[ \"\$REQUEST_URI\" == \"/api/status\" ]]; then
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
-                    elif [[ \"\$REQUEST_URI\" == \"/api/\"* ]]; then
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"success\":true,\"message\":\"API działa\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
-                    elif [[ \"\$REQUEST_URI\" == \"/client\"* ]]; then
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
-                    else
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
-                    fi
-                "
-            done
-        } > /dev/null 2>&1 &
-        
-        echo $! > "$PID_FILE"
-        log "✅ Pełna wersja serwera z Auto-IP uruchomiona"
-        
-    } &
-    
-    # Pozostaw panel działający
-    echo -e "${YELLOW}⏳ Panel kontynuuje pracę w tle...${NC}"
-    echo -e "${YELLOW}🛑 Aby zatrzymać: Ctrl+C${NC}"
-    
-    # Czekaj na Ctrl+C
-    while true; do
-        sleep 10
-    done
+# Zarejestruj trap dla sygnałów
+trap cleanup INT TERM
 
-else
-    # Jeśli panel już istnieje, po prostu go uruchom z Auto-IP
-    echo -e "${GREEN}🔄 Uruchamianie istniejącego panelu z Auto-IP...${NC}"
-    start_web_server
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${YELLOW}🛑 Naciśnij Ctrl+C aby zatrzymać${NC}"
+# Sprawdź argumenty
+case "${1:-}" in
+    "start")
+        # NATYCHMIASTOWE URUCHOMIENIE PANELU Z AUTO-IP
+        quick_initialize
         
+        # Uruchom pełną pętlę serwera w tle
+        {
+            sleep 3
+            stop_web_server
+            
+            # Pełna wersja serwera z API i auto-IP
+            {
+                while true; do
+                    nc -l -p $PORT -c "
+                        read -r request
+                        export REQUEST_URI=\$(echo \"\$request\" | awk '{print \$2}')
+                        export REQUEST_METHOD=\$(echo \"\$request\" | awk '{print \$1}')
+                        
+                        # Aktualizuj IP przy każdym żądaniu
+                        current_ips=\$(get_server_ips)
+                        current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
+                        current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
+                        
+                        if [[ \"\$REQUEST_URI\" == \"/api/status\" ]]; then
+                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
+                            echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
+                        elif [[ \"\$REQUEST_URI\" == \"/api/\"* ]]; then
+                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
+                            echo '{\"success\":true,\"message\":\"API działa\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
+                        elif [[ \"\$REQUEST_URI\" == \"/client\"* ]]; then
+                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
+                            sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
+                        else
+                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
+                            sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
+                        fi
+                    " 2>/dev/null
+                done
+            } > /dev/null 2>&1 &
+            
+            echo $! > "$PID_FILE"
+            log "✅ Pełna wersja serwera z Auto-IP uruchomiona"
+            
+        } &
+        
+        # Pozostaw panel działający
+        echo -e "${YELLOW}⏳ Panel kontynuuje pracę w tle...${NC}"
+        echo -e "${YELLOW}🛑 Aby zatrzymać: Ctrl+C${NC}"
+        
+        # Czekaj na sygnał zakończenia
         while true; do
             sleep 10
         done
-    else
-        echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
-        exit 1
-    fi
-fi
-
-# Przechwyć Ctrl+C
-trap 'stop_web_server; echo -e "\n${YELLOW}🛑 Panel zatrzymany${NC}"; exit 0' INT TERM
+        ;;
+    "stop")
+        stop_web_server
+        ;;
+    "restart")
+        restart_panel
+        ;;
+    "status")
+        show_status
+        ;;
+    "backup")
+        backup_panel
+        ;;
+    "help"|"--help"|"-h")
+        show_help
+        ;;
+    *)
+        # Domyślnie uruchom panel jeśli nie podano argumentów
+        if [ ! -d "$PANEL_DIR" ]; then
+            echo -e "${GREEN}🔄 Uruchamianie nowej instalacji panelu...${NC}"
+            quick_initialize
+        else
+            echo -e "${GREEN}🔄 Uruchamianie istniejącego panelu z Auto-IP...${NC}"
+            start_web_server
+        fi
+        
+        if [ $? -eq 0 ]; then
+            echo -e "${YELLOW}🛑 Naciśnij Ctrl+C aby zatrzymać${NC}"
+            
+            while true; do
+                sleep 10
+            done
+        else
+            echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
+            exit 1
+        fi
+        ;;
+esac
