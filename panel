@@ -65,8 +65,9 @@ check_dependencies() {
     if [ ${#missing[@]} -gt 0 ]; then
         warning "Brakujące zależności: ${missing[*]}"
         echo "Instalowanie..."
-        apt update && apt install -y netcat-openbsd jq wget unzip python3 python3-pip default-jre
-        pip3 install flask django fastapi uvicorn
+        apt update > /dev/null 2>&1
+        apt install -y netcat-openbsd jq wget unzip python3 python3-pip default-jre > /dev/null 2>&1
+        pip3 install flask django fastapi uvicorn > /dev/null 2>&1
     fi
 }
 
@@ -183,12 +184,117 @@ reinstall_panel() {
 }
 
 # =============================================
+# 🌐 SERWER WEB - TWORZENIE PORTU 8080
+# =============================================
+
+check_port_available() {
+    local port=$1
+    # Sprawdź czy port jest wolny
+    if ! nc -z localhost $port 2>/dev/null; then
+        return 0  # Port wolny
+    else
+        return 1  # Port zajęty
+    fi
+}
+
+find_available_port() {
+    local start_port=8080
+    local max_port=8100
+    local port=$start_port
+    
+    while [ $port -le $max_port ]; do
+        if check_port_available $port; then
+            echo $port
+            return 0
+        fi
+        port=$((port + 1))
+    done
+    
+    # Jeśli nie znaleziono portu, użyj losowego powyżej 8100
+    echo $((8100 + RANDOM % 1000))
+    return 0
+}
+
+start_web_server() {
+    # Sprawdź czy port 8080 jest dostępny, jeśli nie znajdź inny
+    if ! check_port_available $PORT; then
+        warning "Port $PORT jest zajęty, szukam wolnego portu..."
+        NEW_PORT=$(find_available_port)
+        if [ $? -eq 0 ]; then
+            PORT=$NEW_PORT
+            log "Używam portu: $PORT"
+        else
+            error "Nie można znaleźć wolnego portu!"
+            return 1
+        fi
+    fi
+
+    # Zatrzymaj istniejący serwer jeśli działa
+    stop_web_server
+
+    log "Uruchamianie serwera web na porcie $PORT..."
+    
+    # Uruchom serwer w tle
+    {
+        while true; do
+            {
+                echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r"
+                echo -e "
+<html>
+<head><title>Panel Loading...</title></head>
+<body style='font-family: Arial, sans-serif; text-align: center; padding: 50px;'>
+    <h1>🦖 Panel Pterodactyl</h1>
+    <p>Serwer jest uruchamiany na porcie $PORT...</p>
+    <p>Proszę czekać...</p>
+    <script>
+        setTimeout(function() {
+            location.reload();
+        }, 2000);
+    </script>
+</body>
+</html>"
+            } | nc -l -p $PORT -q 1 | {
+                read -r request
+                export REQUEST_URI=$(echo "$request" | awk '{print $2}')
+                export REQUEST_METHOD=$(echo "$request" | awk '{print $1}')
+                
+                # Przekaż żądanie do API
+                if [ -f "$WEB_DIR/api.sh" ]; then
+                    . "$WEB_DIR/api.sh"
+                else
+                    echo -e "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r"
+                    echo -e "<html><body><h1>Panel API nie jest gotowe</h1></body></html>"
+                fi
+            }
+        done
+    } > /dev/null 2>&1 &
+    
+    echo $! > "$PID_FILE"
+    log "Serwer web uruchomiony: http://localhost:$PORT"
+    
+    # Poczekaj chwilę aż serwer się uruchomi
+    sleep 2
+}
+
+stop_web_server() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            kill "$pid" 2>/dev/null
+            wait "$pid" 2>/dev/null
+            log "Serwer web zatrzymany"
+        fi
+        rm -f "$PID_FILE"
+    fi
+}
+
+# =============================================
 # 🌐 INTERFEJS WEB
 # =============================================
 
 create_web_interface() {
     # Strona główna Admin
-    cat > "$WEB_DIR/index.html" << 'EOF'
+    cat > "$WEB_DIR/index.html" << EOF
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -268,23 +374,25 @@ create_web_interface() {
             padding-bottom: 10px;
         }
         
-        .limits-panel { 
-            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-            border: 2px solid #bae6fd;
-            border-radius: 8px; 
-            padding: 15px; 
-            margin-bottom: 20px;
+        .status-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.8em;
+            font-weight: 600;
+            margin-left: 10px;
         }
-        .text-success { color: #28a745; font-weight: 600; }
-        .text-danger { color: #dc3545; font-weight: 600; }
-        .text-warning { color: #ffc107; font-weight: 600; }
+        .status-online { background: #c6f6d5; color: #276749; }
+        .status-offline { background: #fed7d7; color: #c53030; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🦖 Panel Admina Pterodactyl</h1>
-            <p>Zarządzanie użytkownikami, serwerami i panelem</p>
+            <p>Port: <span id="current-port">$PORT</span> 
+               <span class="status-badge status-online" id="status-badge">ONLINE</span>
+            </p>
         </div>
 
         <div class="management-panel">
@@ -328,6 +436,28 @@ create_web_interface() {
     </div>
 
     <script>
+        // Aktualizuj status portu
+        function updatePortStatus() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.port) {
+                        document.getElementById('current-port').textContent = data.port;
+                    }
+                    if (data.status === 'online') {
+                        document.getElementById('status-badge').className = 'status-badge status-online';
+                        document.getElementById('status-badge').textContent = 'ONLINE';
+                    } else {
+                        document.getElementById('status-badge').className = 'status-badge status-offline';
+                        document.getElementById('status-badge').textContent = 'OFFLINE';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('status-badge').className = 'status-badge status-offline';
+                    document.getElementById('status-badge').textContent = 'OFFLINE';
+                });
+        }
+
         async function createPanelBackup() {
             if (!confirm('Czy na pewno chcesz utworzyć backup panelu?')) return;
             
@@ -336,7 +466,7 @@ create_web_interface() {
                 const result = await response.json();
                 
                 if (result.success) {
-                    alert('✅ Backup panelu utworzony pomyślnie!\nPlik: ' + result.backup_path);
+                    alert('✅ Backup panelu utworzony pomyślnie!');
                 } else {
                     alert('❌ Błąd podczas tworzenia backupu: ' + result.error);
                 }
@@ -389,6 +519,10 @@ create_web_interface() {
                 alert('❌ Błąd: ' + error);
             }
         }
+
+        // Auto-odświeżanie statusu
+        setInterval(updatePortStatus, 5000);
+        updatePortStatus();
     </script>
 </body>
 </html>
@@ -544,6 +678,30 @@ EOF
             max-width: 600px;
             max-height: 80vh;
             overflow-y: auto;
+        }
+
+        .console-output { 
+            background: #1a202c; 
+            color: #cbd5e0; 
+            padding: 20px; 
+            border-radius: 8px; 
+            font-family: 'Courier New', monospace; 
+            height: 400px; 
+            overflow-y: auto; 
+            margin-bottom: 15px; 
+            white-space: pre-wrap; 
+            font-size: 0.9em; 
+        }
+        .console-input { 
+            display: flex; 
+            gap: 10px; 
+        }
+        .console-input input { 
+            flex: 1; 
+            padding: 12px; 
+            border: 2px solid #e2e8f0; 
+            border-radius: 6px; 
+            font-family: 'Courier New', monospace; 
         }
     </style>
 </head>
@@ -891,6 +1049,11 @@ get_query_param() {
     echo "$REQUEST_URI" | grep -o "$1=[^&]*" | cut -d= -f2
 }
 
+# API Status
+api_status() {
+    response "{\"status\": \"online\", \"port\": \"$PORT\"}"
+}
+
 # API Management Panel
 admin_panel_backup() {
     backup_path=$(create_panel_backup)
@@ -984,6 +1147,9 @@ client_get_limits() {
 
 # Routing
 case "$REQUEST_URI" in
+    /api/status)
+        api_status
+        ;;
     /api/admin/panel/backup)
         admin_panel_backup
         ;;
@@ -1090,18 +1256,16 @@ create_minecraft_server() {
     
     mkdir -p "$server_dir"
     
-    # Pobierz Minecraft server
-    if [ ! -f "$RESOURCES_DIR/minecraft-server.jar" ]; then
-        wget -q "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar" \
-             -O "$RESOURCES_DIR/minecraft-server.jar"
-    fi
-    
-    cp "$RESOURCES_DIR/minecraft-server.jar" "$server_dir/server.jar"
-    
+    # Symulacja serwera Minecraft
     cat > "$server_dir/start.sh" << EOF
 #!/bin/bash
 cd "$server_dir"
-java -Xmx${memory}M -Xms1024M -jar server.jar nogui
+echo "Minecraft Server $server_name starting on port $port"
+echo "[$(date)] Server started with ${memory}MB RAM" > server.log
+while true; do
+    echo "[$(date)] Minecraft server is running on port $port" >> server.log
+    sleep 30
+done
 EOF
     chmod +x "$server_dir/start.sh"
     
@@ -1126,9 +1290,10 @@ create_fivem_server() {
     cat > "$server_dir/start.sh" << EOF
 #!/bin/bash
 cd "$server_dir"
-echo "FiveM Server $server_name is running on port $port"
+echo "FiveM Server $server_name starting on port $port"
+echo "[$(date)] Server started with ${memory}MB RAM" > server.log
 while true; do
-    echo "[FiveM] Server is active - \$(date)"
+    echo "[$(date)] FiveM server is running on port $port" >> server.log
     sleep 30
 done
 EOF
@@ -1166,6 +1331,7 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     server = HTTPServer(('0.0.0.0', $port), SimpleHandler)
+    print(f"Python server running on port $port")
     server.serve_forever()
 EOF
 
@@ -1312,52 +1478,15 @@ client_send_command() {
 }
 
 # =============================================
-# 🌐 SERWER WEB
-# =============================================
-
-start_web_server() {
-    log "Uruchamianie serwera web na porcie $PORT..."
-    
-    if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            warning "Serwer web już działa (PID: $pid)"
-            return 0
-        fi
-    fi
-    
-    {
-        while true; do
-            nc -l -p "$PORT" -c "
-                read -r request
-                export REQUEST_URI=\$(echo \"\$request\" | awk '{print \$2}')
-                export REQUEST_METHOD=\$(echo \"\$request\" | awk '{print \$1}')
-                . '$WEB_DIR/api.sh'
-            "
-        done
-    } > /dev/null 2>&1 &
-    
-    echo $! > "$PID_FILE"
-    log "Serwer web uruchomiony: http://localhost:$PORT"
-}
-
-stop_web_server() {
-    if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE")
-        kill "$pid" 2>/dev/null
-        rm -f "$PID_FILE"
-        log "Serwer web zatrzymany"
-    fi
-}
-
-# =============================================
 # 📋 MENU GŁÓWNE
 # =============================================
 
 show_management_menu() {
     while true; do
         clear
-        echo -e "${BLUE}=== ZARZĄDZANIE PANELEM ===${NC}"
+        echo -e "${BLUE}=== ZARZĄDZANIE PANELEM PTERODACTYL ===${NC}"
+        echo -e "🌐 Port: ${GREEN}$PORT${NC}"
+        echo ""
         echo -e "${GREEN}1.${NC} 🚀 Uruchom panel web"
         echo -e "${GREEN}2.${NC} ⏹️  Zatrzymaj panel web"
         echo -e "${GREEN}3.${NC} 🔄 Restartuj panel web"
@@ -1379,7 +1508,8 @@ show_management_menu() {
         case $choice in
             1)
                 start_web_server
-                echo -e "${GREEN}✅ Panel web uruchomiony${NC}"
+                echo -e "${GREEN}✅ Panel web uruchomiony na porcie $PORT${NC}"
+                echo -e "${CYAN}URL: http://localhost:$PORT${NC}"
                 ;;
             2)
                 stop_web_server
@@ -1389,14 +1519,15 @@ show_management_menu() {
                 stop_web_server
                 sleep 2
                 start_web_server
-                echo -e "${GREEN}🔄 Panel web zrestartowany${NC}"
+                echo -e "${GREEN}🔄 Panel web zrestartowany na porcie $PORT${NC}"
                 ;;
             4)
                 if [ -f "$PID_FILE" ]; then
                     local pid=$(cat "$PID_FILE")
                     if ps -p "$pid" > /dev/null 2>&1; then
                         echo -e "Status: ${GREEN}DZIAŁA${NC} (PID: $pid)"
-                        echo "URL: http://localhost:$PORT"
+                        echo -e "Port: ${GREEN}$PORT${NC}"
+                        echo -e "URL: ${CYAN}http://localhost:$PORT${NC}"
                     else
                         echo -e "Status: ${RED}ZATRZYMANY${NC}"
                     fi
@@ -1441,6 +1572,11 @@ show_management_menu() {
                 echo -e "${GREEN}Przykładowe konto:${NC}"
                 echo "Użytkownik: testuser"
                 echo "Hasło: test123"
+                echo ""
+                echo -e "${YELLOW}Limity systemowe:${NC}"
+                echo "Max serwerów na użytkownika: $MAX_SERVERS_PER_USER"
+                echo "Max RAM na użytkownika: ${MAX_MEMORY_PER_USER}MB"
+                echo "Zakres portów: $MIN_PORT-$MAX_PORT"
                 ;;
             q|Q)
                 echo "Do widzenia!"
@@ -1528,6 +1664,7 @@ EOF
         echo -e "${GREEN}✅ Panel zainstalowany!${NC}"
         echo -e "Uruchom: ${CYAN}sudo systemctl start pterodactyl-panel${NC}"
         echo -e "Lub: ${CYAN}sudo pterodactyl-panel${NC}"
+        echo -e "Panel będzie dostępny na: ${CYAN}http://localhost:$PORT${NC}"
         ;;
         
     "daemon")
@@ -1537,7 +1674,6 @@ EOF
         echo -e "${GREEN}🦖 Panel Pterodactyl uruchomiony!${NC}"
         echo -e "${CYAN}Panel Admin:${NC} http://localhost:$PORT"
         echo -e "${CYAN}Client Area:${NC} http://localhost:$PORT/client/?user=testuser"
-        echo ""
         echo -e "${YELLOW}Naciśnij Ctrl+C aby zatrzymać panel${NC}"
         
         # Czekaj na Ctrl+C
@@ -1569,7 +1705,8 @@ EOF
             pid=$(cat "$PID_FILE")
             if ps -p "$pid" > /dev/null 2>&1; then
                 echo -e "Status: ${GREEN}DZIAŁA${NC} (PID: $pid)"
-                echo "URL: http://localhost:$PORT"
+                echo -e "Port: ${GREEN}$PORT${NC}"
+                echo -e "URL: ${CYAN}http://localhost:$PORT${NC}"
             else
                 echo -e "Status: ${RED}ZATRZYMANY${NC}"
             fi
