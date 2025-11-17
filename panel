@@ -39,6 +39,77 @@ CYAN='\033[0;36m'
 NC='\033[0m'
 
 # =============================================
+# 🌐 FUNKCJE DO WYKRYWANIA IP
+# =============================================
+
+get_local_ip() {
+    # Próbuj różne metody uzyskania lokalnego IP
+    local ip=""
+    
+    # Metoda 1: ip route
+    if command -v ip > /dev/null; then
+        ip=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
+    fi
+    
+    # Metoda 2: hostname -I
+    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    fi
+    
+    # Metoda 3: ifconfig
+    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+        if command -v ifconfig > /dev/null; then
+            ip=$(ifconfig 2>/dev/null | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | head -1)
+        fi
+    fi
+    
+    # Metoda 4: netstat
+    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+        if command -v netstat > /dev/null; then
+            ip=$(netstat -rn 2>/dev/null | grep -E '^0.0.0.0' | awk '{print $2}' | head -1)
+        fi
+    fi
+    
+    # Jeśli nadal nie znaleziono, użyj localhost
+    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
+        ip="localhost"
+    fi
+    
+    echo "$ip"
+}
+
+get_public_ip() {
+    # Próbuj uzyskać publiczne IP
+    local public_ip=""
+    
+    # Metoda 1: curl do zewnętrznych serwisów
+    if command -v curl > /dev/null; then
+        public_ip=$(curl -s --connect-timeout 3 http://ipinfo.io/ip 2>/dev/null || \
+                   curl -s --connect-timeout 3 http://ifconfig.me 2>/dev/null || \
+                   curl -s --connect-timeout 3 http://api.ipify.org 2>/dev/null)
+    fi
+    
+    # Metoda 2: wget
+    if [ -z "$public_ip" ] && command -v wget > /dev/null; then
+        public_ip=$(wget -q -O - --timeout=3 http://ipinfo.io/ip 2>/dev/null)
+    fi
+    
+    echo "$public_ip"
+}
+
+get_server_ips() {
+    local local_ip=$(get_local_ip)
+    local public_ip=$(get_public_ip)
+    
+    # Sprawdź czy publiczne IP jest inne niż lokalne
+    if [ -n "$public_ip" ] && [ "$public_ip" != "$local_ip" ] && [ "$public_ip" != "localhost" ]; then
+        echo "$local_ip|$public_ip"
+    else
+        echo "$local_ip|"
+    fi
+}
+
+# =============================================
 # 🛠️ FUNKCJE POMOCNICZE
 # =============================================
 
@@ -57,7 +128,7 @@ warning() {
 check_dependencies() {
     echo -e "${YELLOW}Sprawdzanie zależności...${NC}"
     local missing=()
-    for cmd in nc jq wget unzip python3 java; do
+    for cmd in nc jq wget unzip python3 java curl; do
         if ! command -v $cmd &> /dev/null; then
             missing+=("$cmd")
         fi
@@ -67,7 +138,7 @@ check_dependencies() {
         warning "Brakujące zależności: ${missing[*]}"
         echo "Instalowanie..."
         apt update > /dev/null 2>&1
-        apt install -y netcat-openbsd jq wget unzip python3 python3-pip default-jre > /dev/null 2>&1
+        apt install -y netcat-openbsd jq wget unzip python3 python3-pip default-jre curl > /dev/null 2>&1
         pip3 install flask django fastapi uvicorn > /dev/null 2>&1
         echo -e "${GREEN}✅ Zależności zainstalowane${NC}"
     else
@@ -81,34 +152,15 @@ setup_directories() {
 }
 
 # =============================================
-# 🔧 ZARZĄDZANIE PANELEM
-# =============================================
-
-create_panel_backup() {
-    local backup_name="panel-backup-$(date '+%Y%m%d-%H%M%S')"
-    local backup_path="$PANEL_BACKUP_DIR/$backup_name.tar.gz"
-    
-    log "Tworzenie backupu panelu..."
-    if tar -czf "$backup_path" -C /home panel 2>/dev/null; then
-        log "Backup panelu utworzony: $backup_path"
-        echo "$backup_path"
-    else
-        error "Błąd podczas tworzenia backupu panelu"
-        return 1
-    fi
-}
-
-# =============================================
-# 🌐 SERWER WEB - NATYCHMIASTOWE URUCHOMIENIE
+# 🌐 SERWER WEB Z AUTO-IP
 # =============================================
 
 check_port_available() {
     local port=$1
-    # Sprawdź czy port jest wolny
     if ! nc -z localhost $port 2>/dev/null; then
-        return 0  # Port wolny
+        return 0
     else
-        return 1  # Port zajęty
+        return 1
     fi
 }
 
@@ -125,13 +177,12 @@ find_available_port() {
         port=$((port + 1))
     done
     
-    # Jeśli nie znaleziono portu, użyj losowego powyżej 8100
     echo $((8100 + RANDOM % 1000))
     return 0
 }
 
 start_web_server() {
-    # Sprawdź czy port 8080 jest dostępny, jeśli nie znajdź inny
+    # Sprawdź i znajdź port
     if ! check_port_available $PORT; then
         warning "Port $PORT jest zajęty, szukam wolnego portu..."
         NEW_PORT=$(find_available_port)
@@ -147,9 +198,16 @@ start_web_server() {
     # Zatrzymaj istniejący serwer jeśli działa
     stop_web_server
 
+    # Pobierz adresy IP serwera
+    local ips=$(get_server_ips)
+    local local_ip=$(echo "$ips" | cut -d'|' -f1)
+    local public_ip=$(echo "$ips" | cut -d'|' -f2)
+    
+    log "Wykryte IP: Lokalne: $local_ip, Publiczne: ${public_ip:-brak}"
+
     log "Uruchamianie serwera web na porcie $PORT..."
     
-    # Uruchom serwer w tle - UPROSZCZONA WERSJA DLA SZYBSZEGO STARTOWANIA
+    # Uruchom serwer w tle
     {
         while true; do
             nc -l -p $PORT -c "
@@ -157,24 +215,28 @@ start_web_server() {
                 uri=\$(echo \"\$request\" | awk '{print \$2}')
                 method=\$(echo \"\$request\" | awk '{print \$1}')
                 
-                # Prosty routing
+                # Aktualizuj IP przy każdym żądaniu
+                current_ips=\$(get_server_ips)
+                current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
+                current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
+                
                 case \"\$uri\" in
                     \"/\"|\"/admin\"|\"/admin/\"*)
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        cat \"$WEB_DIR/index.html\" 2>/dev/null || echo \"<h1>Panel Pterodactyl</h1><p>Panel jest uruchomiony na porcie $PORT</p>\"
+                        # Zastąp placeholdery aktualnymi IP
+                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
                         ;;
                     \"/client\"*)
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        cat \"$WEB_DIR/client/index.html\" 2>/dev/null || echo \"<h1>Client Panel</h1><p>Panel klienta</p>\"
+                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
                         ;;
                     \"/api/\"*)
-                        # Proste API
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"message\":\"Panel działa poprawnie\"}'
+                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
                         ;;
                     *)
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        cat \"$WEB_DIR/index.html\" 2>/dev/null || echo \"<h1>Panel Pterodactyl</h1><p>Port: $PORT</p>\"
+                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
                         ;;
                 esac
             "
@@ -182,9 +244,16 @@ start_web_server() {
     } > /dev/null 2>&1 &
     
     echo $! > "$PID_FILE"
-    log "✅ Serwer web uruchomiony: http://localhost:$PORT"
+    log "✅ Serwer web uruchomiony"
     
-    # Natychmiastowe zwrócenie kontroli - NIE CZEKAJ
+    # Wyświetl informacje o dostępie
+    echo -e "${GREEN}🌐 Adresy dostępu:${NC}"
+    echo -e "${CYAN}  Local:${NC}    http://$local_ip:$PORT"
+    if [ -n "$public_ip" ]; then
+        echo -e "${CYAN}  Public:${NC}   http://$public_ip:$PORT"
+    fi
+    echo -e "${CYAN}  Localhost:${NC} http://localhost:$PORT"
+    
     return 0
 }
 
@@ -201,11 +270,11 @@ stop_web_server() {
 }
 
 # =============================================
-# 🌐 INTERFEJS WEB - UPROSZCZONY
+# 🌐 INTERFEJS WEB Z AUTO-IP
 # =============================================
 
 create_web_interface() {
-    # Strona główna Admin - UPROSZCZONA
+    # Strona główna Admin z dynamicznym IP
     cat > "$WEB_DIR/index.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
@@ -248,6 +317,23 @@ create_web_interface() {
             border-radius: 20px;
             display: inline-block;
             font-weight: bold;
+            margin: 5px;
+        }
+        .ip-info {
+            background: #e0f2fe;
+            border: 2px solid #bae6fd;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .ip-address {
+            font-family: 'Courier New', monospace;
+            background: #1a202c;
+            color: #cbd5e0;
+            padding: 10px 15px;
+            border-radius: 5px;
+            margin: 5px 0;
+            display: inline-block;
         }
         .card-grid { 
             display: grid; 
@@ -279,10 +365,12 @@ create_web_interface() {
             border: none;
             cursor: pointer;
             font-size: 1em;
+            margin: 5px;
         }
         .btn-success { background: #48bb78; }
         .btn-warning { background: #ed8936; }
         .btn-danger { background: #e53e3e; }
+        .btn-info { background: #38b2ac; }
         .btn:hover { opacity: 0.9; transform: translateY(-2px); }
         
         .info-panel {
@@ -292,20 +380,49 @@ create_web_interface() {
             padding: 20px;
             margin-bottom: 30px;
         }
+        .copy-btn {
+            background: #4a5568;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 3px;
+            cursor: pointer;
+            margin-left: 10px;
+            font-size: 0.8em;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🦖 Panel Pterodactyl</h1>
-            <p>Port: <strong id="current-port">8080</strong> • 
+            <p>Port: <strong>%%PORT%%</strong> • 
                <span class="status">✅ ONLINE</span>
             </p>
         </div>
 
+        <div class="ip-info">
+            <h3>🌐 Adresy Serwera</h3>
+            <div style="margin: 15px 0;">
+                <strong>Lokalne IP:</strong><br>
+                <span class="ip-address" id="local-ip">http://%%LOCAL_IP%%:%%PORT%%</span>
+                <button class="copy-btn" onclick="copyToClipboard('local-ip')">📋</button>
+            </div>
+            <div style="margin: 15px 0;">
+                <strong>Publiczne IP:</strong><br>
+                <span class="ip-address" id="public-ip">http://%%PUBLIC_IP%%:%%PORT%%</span>
+                <button class="copy-btn" onclick="copyToClipboard('public-ip')">📋</button>
+            </div>
+            <div style="margin: 15px 0;">
+                <strong>Localhost:</strong><br>
+                <span class="ip-address" id="localhost-ip">http://localhost:%%PORT%%</span>
+                <button class="copy-btn" onclick="copyToClipboard('localhost-ip')">📋</button>
+            </div>
+        </div>
+
         <div class="info-panel">
             <h3>🚀 Panel został uruchomiony pomyślnie!</h3>
-            <p>Możesz teraz zarządzać serwerami i użytkownikami.</p>
+            <p>Użyj powyższych adresów aby uzyskać dostęp do panelu z innych urządzeń w sieci.</p>
         </div>
 
         <div class="card-grid">
@@ -337,24 +454,53 @@ create_web_interface() {
                 <p>Przejdź do panelu klienta</p>
                 <a href="/client/?user=testuser" class="btn btn-success">Client Area</a>
             </div>
+            <div class="card">
+                <h3>🔄 Odśwież IP</h3>
+                <p>Ponownie wykryj adresy IP</p>
+                <button class="btn btn-info" onclick="refreshIPs()">🔄 Odśwież</button>
+            </div>
         </div>
     </div>
 
     <script>
-        // Pobierz aktualny port
-        fetch('/api/status')
-            .then(response => response.json())
-            .then(data => {
-                if (data.port) {
-                    document.getElementById('current-port').textContent = data.port;
-                }
+        function copyToClipboard(elementId) {
+            const text = document.getElementById(elementId).textContent;
+            navigator.clipboard.writeText(text).then(() => {
+                alert('✅ Skopiowano: ' + text);
             });
+        }
+
+        function refreshIPs() {
+            fetch('/api/status')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.local_ip && data.port) {
+                        document.getElementById('local-ip').textContent = 
+                            'http://' + data.local_ip + ':' + data.port;
+                    }
+                    if (data.public_ip && data.port) {
+                        document.getElementById('public-ip').textContent = 
+                            'http://' + data.public_ip + ':' + data.port;
+                    }
+                    if (data.port) {
+                        document.getElementById('localhost-ip').textContent = 
+                            'http://localhost:' + data.port;
+                    }
+                    alert('✅ Adresy IP zaktualizowane!');
+                })
+                .catch(error => {
+                    alert('❌ Błąd podczas odświeżania IP');
+                });
+        }
+
+        // Auto-odświeżanie co 30 sekund
+        setInterval(refreshIPs, 30000);
     </script>
 </body>
 </html>
 EOF
 
-    # Panel klienta - UPROSZCZONY
+    # Panel klienta z dynamicznym IP
     mkdir -p "$WEB_DIR/client"
     cat > "$WEB_DIR/client/index.html" << 'EOF'
 <!DOCTYPE html>
@@ -389,6 +535,23 @@ EOF
             margin-bottom: 10px; 
             color: #2d3748;
         }
+        .ip-info {
+            background: #e0f2fe;
+            border: 2px solid #bae6fd;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        .ip-address {
+            font-family: 'Courier New', monospace;
+            background: #1a202c;
+            color: #cbd5e0;
+            padding: 8px 12px;
+            border-radius: 5px;
+            margin: 5px;
+            display: inline-block;
+        }
         .card { 
             background: white; 
             padding: 30px; 
@@ -417,6 +580,19 @@ EOF
         <div class="header">
             <h1>👋 Witaj w Panelu Klienta</h1>
             <p>Zarządzaj swoimi serwerami</p>
+        </div>
+
+        <div class="ip-info">
+            <h3>🌐 Adres Panelu</h3>
+            <div>
+                <span class="ip-address">http://%%LOCAL_IP%%:%%PORT%%/client/</span>
+            </div>
+            <div>
+                <span class="ip-address">http://%%PUBLIC_IP%%:%%PORT%%/client/</span>
+            </div>
+            <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
+                Użyj tych adresów aby uzyskać dostęp z innych urządzeń
+            </p>
         </div>
 
         <div class="card">
@@ -449,6 +625,7 @@ EOF
                     <h3>🦖 Przykładowy Serwer</h3>
                     <p>Status: <span style="color: #48bb78;">● DZIAŁA</span></p>
                     <p>Typ: Minecraft • Port: 25565 • RAM: 2048MB</p>
+                    <p>Adres: <code>%%LOCAL_IP%%:25565</code></p>
                 </div>
             `;
         }, 1000);
@@ -457,11 +634,11 @@ EOF
 </html>
 EOF
 
-    echo -e "${GREEN}✅ Interfejs web utworzony${NC}"
+    echo -e "${GREEN}✅ Interfejs web utworzony z dynamicznym IP${NC}"
 }
 
 # =============================================
-# 🚀 SZYBKA INICJALIZACJA
+# 🚀 SZYBKA INICJALIZACJA Z AUTO-IP
 # =============================================
 
 quick_initialize() {
@@ -474,12 +651,12 @@ quick_initialize() {
     fi
     
     # Szybkie sprawdzenie zależności
-    echo -e "${YELLOW}🔍 Szybkie sprawdzenie zależności...${NC}"
-    for cmd in nc python3; do
+    echo -e "${YELLOW}🔍 Sprawdzanie zależności...${NC}"
+    for cmd in nc python3 curl; do
         if ! command -v $cmd &> /dev/null; then
             echo -e "${YELLOW}📦 Instalowanie: $cmd${NC}"
             apt update > /dev/null 2>&1
-            apt install -y netcat-openbsd python3 > /dev/null 2>&1
+            apt install -y netcat-openbsd python3 curl > /dev/null 2>&1
         fi
     done
     
@@ -498,11 +675,24 @@ EOF
         echo -e "${GREEN}✅ Utworzono użytkownika testowego${NC}"
     fi
     
+    # Wykryj IP przed uruchomieniem
+    echo -e "${YELLOW}🌐 Wykrywanie adresów IP serwera...${NC}"
+    local ips=$(get_server_ips)
+    local local_ip=$(echo "$ips" | cut -d'|' -f1)
+    local public_ip=$(echo "$ips" | cut -d'|' -f2)
+    
+    echo -e "${CYAN}📡 Lokalne IP:${NC} $local_ip"
+    if [ -n "$public_ip" ]; then
+        echo -e "${CYAN}🌍 Publiczne IP:${NC} $public_ip"
+    else
+        echo -e "${YELLOW}🌍 Publiczne IP:${NC} nie wykryto (tylko sieć lokalna)"
+    fi
+    
     # Utwórz interfejs web
     echo -e "${YELLOW}🌐 Tworzenie interfejsu web...${NC}"
     create_web_interface
     
-    # URUCHOM SERwer NATYCHMIAST
+    # URUCHOM SERWER NATYCHMIAST
     echo -e "${YELLOW}🚀 Uruchamianie serwera web...${NC}"
     start_web_server
     
@@ -510,11 +700,10 @@ EOF
         echo -e "${GREEN}=============================================${NC}"
         echo -e "${GREEN}🎉 PANEL PTERODACTYL JEST GOTOWY!${NC}"
         echo -e "${GREEN}=============================================${NC}"
-        echo -e "${CYAN}🌐 Panel Admin:${NC}    http://localhost:$PORT"
-        echo -e "${CYAN}👤 Client Area:${NC}    http://localhost:$PORT/client/?user=testuser"
         echo -e "${CYAN}🔐 Dane testowe:${NC}   użytkownik: testuser, hasło: test123"
         echo -e "${GREEN}=============================================${NC}"
         echo -e "${YELLOW}💡 Panel jest już dostępny w przeglądarce!${NC}"
+        echo -e "${YELLOW}📱 Użyj adresów IP aby uzyskać dostęp z innych urządzeń${NC}"
     else
         echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
         exit 1
@@ -522,23 +711,20 @@ EOF
 }
 
 # =============================================
-# 📜 MAIN SCRIPT - NATYCHMIASTOWE URUCHOMIENIE
+# 📜 MAIN SCRIPT - AUTO-IP
 # =============================================
 
 # Sprawdź czy to pierwsze uruchomienie
 if [ ! -d "$PANEL_DIR" ] || [ "$1" = "start" ]; then
-    # NATYCHMIASTOWE URUCHOMIENIE PANELU
+    # NATYCHMIASTOWE URUCHOMIENIE PANELU Z AUTO-IP
     quick_initialize
     
     # Uruchom pełną pętlę serwera w tle
     {
-        # Poczekaj chwilę aż podstawowy serwer się uruchomi
         sleep 3
-        
-        # Teraz uruchom pełną wersję serwera z API
         stop_web_server
         
-        # Pełna wersja serwera z API
+        # Pełna wersja serwera z API i auto-IP
         {
             while true; do
                 nc -l -p $PORT -c "
@@ -546,26 +732,30 @@ if [ ! -d "$PANEL_DIR" ] || [ "$1" = "start" ]; then
                     export REQUEST_URI=\$(echo \"\$request\" | awk '{print \$2}')
                     export REQUEST_METHOD=\$(echo \"\$request\" | awk '{print \$1}')
                     
-                    # Proste API
+                    # Aktualizuj IP przy każdym żądaniu
+                    current_ips=\$(get_server_ips)
+                    current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
+                    current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
+                    
                     if [[ \"\$REQUEST_URI\" == \"/api/status\" ]]; then
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"message\":\"Panel działa poprawnie\"}'
+                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
                     elif [[ \"\$REQUEST_URI\" == \"/api/\"* ]]; then
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"success\":true,\"message\":\"API działa\"}'
+                        echo '{\"success\":true,\"message\":\"API działa\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
                     elif [[ \"\$REQUEST_URI\" == \"/client\"* ]]; then
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        cat \"$WEB_DIR/client/index.html\"
+                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
                     else
                         echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        cat \"$WEB_DIR/index.html\"
+                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
                     fi
                 "
             done
         } > /dev/null 2>&1 &
         
         echo $! > "$PID_FILE"
-        log "✅ Pełna wersja serwera uruchomiona"
+        log "✅ Pełna wersja serwera z Auto-IP uruchomiona"
         
     } &
     
@@ -579,15 +769,13 @@ if [ ! -d "$PANEL_DIR" ] || [ "$1" = "start" ]; then
     done
 
 else
-    # Jeśli panel już istnieje, po prostu go uruchom
-    echo -e "${GREEN}🔄 Uruchamianie istniejącego panelu...${NC}"
+    # Jeśli panel już istnieje, po prostu go uruchom z Auto-IP
+    echo -e "${GREEN}🔄 Uruchamianie istniejącego panelu z Auto-IP...${NC}"
     start_web_server
     
     if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Panel uruchomiony: http://localhost:$PORT${NC}"
         echo -e "${YELLOW}🛑 Naciśnij Ctrl+C aby zatrzymać${NC}"
         
-        # Czekaj na Ctrl+C
         while true; do
             sleep 10
         done
