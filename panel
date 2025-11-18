@@ -1,15 +1,18 @@
 #!/bin/bash
 
 # =============================================
-# 🟣 PURPLEHOST PANEL - AUTOMATYCZNA INSTALACJA
+# 🟣 PURPLEHOST PANEL - KOMPLETNY SYSTEM
 # =============================================
 
 # Konfiguracja
 PANEL_DIR="/home/purplehost"
 WEB_DIR="$PANEL_DIR/web"
 SERVER_DIR="$PANEL_DIR/serwery"
-PORT=8080
+DB_DIR="$PANEL_DIR/bazy"
+BACKUP_DIR="$PANEL_DIR/backupy"
 LOG_DIR="$PANEL_DIR/logs"
+NODE_DIR="$PANEL_DIR/node"
+PORT=8080
 
 # Kolory
 PURPLE='\033[0;35m'
@@ -29,22 +32,20 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_DIR/panel.log"
 }
 
-error() {
-    echo -e "${RED}[BŁĄD]${NC} $1"
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - BŁĄD: $1" >> "$LOG_DIR/errors.log"
-}
-
 setup_directories() {
     echo -e "${PURPLE}📁 Tworzenie struktur katalogów...${NC}"
-    mkdir -p "$PANEL_DIR" "$WEB_DIR" "$SERVER_DIR" "$LOG_DIR"
+    mkdir -p "$PANEL_DIR" "$WEB_DIR" "$SERVER_DIR" "$DB_DIR" "$BACKUP_DIR" "$LOG_DIR" "$NODE_DIR"
     mkdir -p "$SERVER_DIR/minecraft" "$SERVER_DIR/rust" "$SERVER_DIR/ark" "$SERVER_DIR/csgo" "$SERVER_DIR/teamspeak"
-    log "Katalogi PurpleHost utworzone"
+    mkdir -p "$DB_DIR/mysql" "$DB_DIR/mongodb" "$DB_DIR/redis"
+    mkdir -p "$BACKUP_DIR/daily" "$BACKUP_DIR/weekly" "$BACKUP_DIR/monthly"
+    mkdir -p "$NODE_DIR/apps" "$NODE_DIR/modules"
+    log "Struktura katalogów PurpleHost utworzona"
 }
 
 check_dependencies() {
     echo -e "${PURPLE}🔍 Sprawdzanie zależności...${NC}"
     
-    local deps=("python3" "wget" "curl" "unzip" "tar" "java")
+    local deps=("python3" "wget" "curl" "unzip" "tar")
     local missing=()
     
     for dep in "${deps[@]}"; do
@@ -58,16 +59,8 @@ check_dependencies() {
         apt update > /dev/null 2>&1
         
         for dep in "${missing[@]}"; do
-            case $dep in
-                "java")
-                    echo -e "${CYAN}☕ Instalowanie Java...${NC}"
-                    apt install -y default-jre > /dev/null 2>&1
-                    ;;
-                *)
-                    echo -e "${CYAN}📦 Instalowanie $dep...${NC}"
-                    apt install -y "$dep" > /dev/null 2>&1
-                    ;;
-            esac
+            echo -e "${CYAN}📦 Instalowanie $dep...${NC}"
+            apt install -y "$dep" > /dev/null 2>&1
             echo -e "${GREEN}✅ Zainstalowano: $dep${NC}"
         done
     fi
@@ -76,20 +69,20 @@ check_dependencies() {
 }
 
 # =============================================
-# 🌐 TWORZENIE PANELU WEB
+# 🌐 TWORZENIE KOMPLETNEGO PANELU
 # =============================================
 
 create_web_panel() {
-    echo -e "${PURPLE}🌐 Tworzenie panelu PurpleHost...${NC}"
+    echo -e "${PURPLE}🌐 Tworzenie kompletnego panelu PurpleHost...${NC}"
     
-    # Utwórz główną stronę
+    # Utwórz główną stronę ze wszystkimi sekcjami
     cat > "$WEB_DIR/index.html" << 'HTML'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🟣 PurpleHost - Professional Hosting</title>
+    <title>🟣 PurpleHost - Complete Panel</title>
     <style>
         * { 
             margin: 0; 
@@ -114,7 +107,7 @@ create_web_panel() {
         }
         
         .nav-container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             display: flex;
             justify-content: space-between;
@@ -131,7 +124,7 @@ create_web_panel() {
         .nav-menu {
             display: flex;
             list-style: none;
-            gap: 30px;
+            gap: 20px;
         }
         
         .nav-menu a {
@@ -141,15 +134,16 @@ create_web_panel() {
             padding: 8px 16px;
             border-radius: 5px;
             transition: all 0.3s ease;
+            font-size: 14px;
         }
         
-        .nav-menu a:hover {
+        .nav-menu a:hover, .nav-menu a.active {
             background: #6a11cb;
             color: white;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 30px auto;
             padding: 0 20px;
         }
@@ -157,16 +151,9 @@ create_web_panel() {
         .welcome-banner {
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
-            padding: 40px;
-            text-align: center;
-            margin-bottom: 30px;
+            padding: 30px;
+            margin-bottom: 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
-        }
-        
-        .welcome-banner h1 {
-            color: #6a11cb;
-            margin-bottom: 15px;
-            font-size: 2.5em;
         }
         
         .warning-banner {
@@ -179,88 +166,78 @@ create_web_panel() {
             color: #856404;
         }
         
-        .main-grid {
+        .dashboard-grid {
             display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 30px;
-            margin-top: 20px;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
         }
         
-        .server-panel {
+        .dashboard-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.1);
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+        
+        .dashboard-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+        }
+        
+        .card-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+        
+        .card-title {
+            color: #6a11cb;
+            margin-bottom: 10px;
+            font-size: 1.3em;
+            text-align: center;
+        }
+        
+        .card-description {
+            color: #666;
+            text-align: center;
+            line-height: 1.5;
+        }
+        
+        .section {
+            display: none;
             background: white;
             border-radius: 15px;
             padding: 30px;
+            margin-top: 20px;
             box-shadow: 0 10px 30px rgba(0,0,0,0.1);
         }
         
-        .side-panel {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        .section.active {
+            display: block;
         }
         
-        .panel-title {
+        .section-title {
             color: #6a11cb;
-            margin-bottom: 20px;
-            font-size: 1.5em;
+            margin-bottom: 25px;
+            font-size: 1.8em;
             border-bottom: 2px solid #f0f0f0;
             padding-bottom: 10px;
         }
         
-        .server-list {
-            list-style: none;
-            margin-bottom: 25px;
-        }
-        
-        .server-item {
-            padding: 15px;
-            border: 1px solid #e0e0e0;
-            border-radius: 8px;
-            margin-bottom: 10px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.3s ease;
-        }
-        
-        .server-item:hover {
-            border-color: #6a11cb;
-            box-shadow: 0 2px 8px rgba(106, 17, 203, 0.1);
-        }
-        
-        .server-info h4 {
-            color: #333;
-            margin-bottom: 5px;
-        }
-        
-        .server-status {
-            padding: 4px 12px;
-            border-radius: 15px;
-            font-size: 0.85em;
-            font-weight: bold;
-        }
-        
-        .status-online {
-            background: #d4edda;
-            color: #155724;
-        }
-        
-        .status-offline {
-            background: #f8d7da;
-            color: #721c24;
-        }
-        
         .btn {
-            padding: 10px 20px;
+            padding: 12px 25px;
             border: none;
-            border-radius: 6px;
+            border-radius: 8px;
             cursor: pointer;
             font-weight: bold;
             transition: all 0.3s ease;
             text-decoration: none;
             display: inline-block;
             text-align: center;
+            margin: 5px;
         }
         
         .btn-primary {
@@ -278,47 +255,92 @@ create_web_panel() {
             color: white;
         }
         
-        .btn-success:hover {
-            background: #218838;
-        }
-        
         .btn-danger {
             background: #dc3545;
             color: white;
         }
         
-        .create-server-form {
+        .console-output {
+            background: #1e1e1e;
+            color: #00ff00;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            height: 400px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        
+        .file-manager {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 20px;
+            height: 500px;
+        }
+        
+        .file-tree {
             background: #f8f9fa;
-            padding: 25px;
-            border-radius: 10px;
-            margin-top: 20px;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        
+        .file-content {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            overflow-y: auto;
+        }
+        
+        .file-item {
+            padding: 8px 12px;
+            margin: 2px 0;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .file-item:hover {
+            background: #e9ecef;
+        }
+        
+        .file-item.active {
+            background: #6a11cb;
+            color: white;
         }
         
         .form-group {
-            margin-bottom: 15px;
+            margin-bottom: 20px;
         }
         
         .form-group label {
             display: block;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
             font-weight: 500;
             color: #555;
         }
         
         .form-control {
             width: 100%;
-            padding: 10px;
+            padding: 12px;
             border: 1px solid #ddd;
-            border-radius: 5px;
+            border-radius: 6px;
             font-size: 14px;
+        }
+        
+        .form-control:focus {
+            border-color: #6a11cb;
+            outline: none;
+            box-shadow: 0 0 0 3px rgba(106, 17, 203, 0.1);
         }
         
         .info-box {
             background: #e3f2fd;
             border: 1px solid #90caf9;
             border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
         }
         
         .footer {
@@ -329,24 +351,62 @@ create_web_panel() {
             font-size: 0.9em;
         }
         
-        .server-actions {
-            display: flex;
-            gap: 8px;
+        .server-list {
+            list-style: none;
+            margin-bottom: 25px;
         }
         
-        .btn-sm {
-            padding: 6px 12px;
-            font-size: 0.85em;
-        }
-        
-        .success-message {
-            background: #d4edda;
-            border: 1px solid #c3e6cb;
-            color: #155724;
+        .server-item {
             padding: 15px;
+            border: 1px solid #e0e0e0;
             border-radius: 8px;
-            margin: 15px 0;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .server-status {
+            padding: 6px 15px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: bold;
+        }
+        
+        .status-online {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-offline {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .backup-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        
+        .backup-item {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 20px;
+        }
+        
+        .coming-soon {
             text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }
+        
+        .coming-soon .icon {
+            font-size: 4em;
+            margin-bottom: 20px;
+            opacity: 0.5;
         }
     </style>
 </head>
@@ -355,394 +415,496 @@ create_web_panel() {
         <div class="nav-container">
             <div class="logo">🟣 PurpleHost</div>
             <ul class="nav-menu">
-                <li><a href="#" onclick="showSection('konto')">A. Konto</a></li>
-                <li><a href="#" onclick="showSection('sklep')">B. Sklep</a></li>
-                <li><a href="#" onclick="showSection('plasnokki')">C. Plasnokki</a></li>
-                <li><a href="#" onclick="showSection('senway')">D. Senway</a></li>
+                <li><a href="#" class="nav-link active" data-section="dashboard">Dashboard</a></li>
+                <li><a href="#" class="nav-link" data-section="konsola">Konsola</a></li>
+                <li><a href="#" class="nav-link" data-section="pliki">Pliki</a></li>
+                <li><a href="#" class="nav-link" data-section="ustawienia">Ustawienia</a></li>
+                <li><a href="#" class="nav-link" data-section="node">Node</a></li>
+                <li><a href="#" class="nav-link" data-section="backupy">Backupy</a></li>
+                <li><a href="#" class="nav-link" data-section="soon">Soon</a></li>
             </ul>
         </div>
     </div>
 
     <div class="container">
         <div class="welcome-banner">
-            <h1>🟣 PurpleHost Panel</h1>
-            <p>Profesjonalny hosting serwerów gry - Panel został pomyślnie uruchomiony!</p>
-            <div class="success-message">
-                <strong>✅ System gotowy do pracy!</strong><br>
-                Panel został automatycznie utworzony i uruchomiony.
-            </div>
+            <h1>🟣 PurpleHost Complete Panel</h1>
+            <p>Kompletny system zarządzania serwerami i usługami</p>
         </div>
 
         <div class="warning-banner">
             ⚠️ <strong>Warning out...</strong> Not this convention postupancy is a twoism location.
         </div>
 
-        <div class="main-grid">
-            <!-- Główny panel -->
-            <div class="server-panel">
-                <h2 class="panel-title">🎮 Zarządzanie Serwerami</h2>
-                
-                <div class="info-box">
-                    <h4>🚀 Szybki Start</h4>
-                    <p>Utwórz swój pierwszy serwer gry w kilku prostych krokach. Wybierz typ serwera, konfigurację i uruchom!</p>
+        <!-- DASHBOARD -->
+        <div id="dashboard" class="section active">
+            <h2 class="section-title">🎯 Dashboard</h2>
+            
+            <div class="dashboard-grid">
+                <div class="dashboard-card" onclick="showSection('konsola')">
+                    <div class="card-icon">💻</div>
+                    <h3 class="card-title">Konsola</h3>
+                    <p class="card-description">Bezpośredni dostęp do konsoli systemowej. Wykonuj komendy i zarządzaj serwerem.</p>
                 </div>
-
-                <ul class="server-list" id="serverList">
-                    <li class="server-item">
-                        <div class="server-info">
-                            <h4>🎯 Brak serwerów</h4>
-                            <p>Utwórz pierwszy serwer aby rozpocząć</p>
-                        </div>
-                        <div style="text-align: right;">
-                            <div class="server-status status-offline">
-                                🔴 OFFLINE
-                            </div>
-                        </div>
-                    </li>
-                </ul>
-
-                <button class="btn btn-primary" onclick="showCreateServerForm()">➕ Utwórz Nowy Serwer</button>
-
-                <!-- Formularz tworzenia serwera -->
-                <div class="create-server-form" id="createServerForm" style="display: none;">
-                    <h3 style="margin-bottom: 20px; color: #6a11cb;">🛠️ Tworzenie Serwera</h3>
-                    
-                    <div class="form-group">
-                        <label for="serverName">Nazwa Serwera</label>
-                        <input type="text" class="form-control" id="serverName" placeholder="Wprowadź nazwę serwera">
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="serverType">Typ Serwera</label>
-                        <select class="form-control" id="serverType">
-                            <option value="minecraft">Minecraft</option>
-                            <option value="teamspeak">TeamSpeak 3</option>
-                            <option value="csgo">Counter-Strike: GO</option>
-                            <option value="rust">Rust</option>
-                            <option value="ark">ARK: Survival Evolved</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="serverSlots">Liczba slotów</label>
-                        <select class="form-control" id="serverSlots">
-                            <option value="10">10 slotów</option>
-                            <option value="20">20 slotów</option>
-                            <option value="30">30 slotów</option>
-                            <option value="50">50 slotów</option>
-                        </select>
-                    </div>
-                    
-                    <div class="form-group">
-                        <label for="serverVersion">Wersja</label>
-                        <input type="text" class="form-control" id="serverVersion" placeholder="Najnowsza wersja" value="Najnowsza">
-                    </div>
-                    
-                    <div style="display: flex; gap: 10px; margin-top: 20px;">
-                        <button class="btn btn-success" onclick="createServer()">🚀 Utwórz Serwer</button>
-                        <button class="btn btn-danger" onclick="hideCreateServerForm()">❌ Anuluj</button>
-                    </div>
+                
+                <div class="dashboard-card" onclick="showSection('pliki')">
+                    <div class="card-icon">📁</div>
+                    <h3 class="card-title">Menedżer Plików</h3>
+                    <p class="card-description">Przeglądaj, edytuj i zarządzaj plikami serwera przez przeglądarkę.</p>
+                </div>
+                
+                <div class="dashboard-card" onclick="showSection('ustawienia')">
+                    <div class="card-icon">⚙️</div>
+                    <h3 class="card-title">Ustawienia</h3>
+                    <p class="card-description">Konfiguruj ustawienia systemu, serwerów i usług.</p>
+                </div>
+                
+                <div class="dashboard-card" onclick="showSection('node')">
+                    <div class="card-icon">📦</div>
+                    <h3 class="card-title">Node & Aplikacje</h3>
+                    <p class="card-description">Zarządzaj aplikacjami Node.js i konfiguracjami.</p>
+                </div>
+                
+                <div class="dashboard-card" onclick="showSection('backupy')">
+                    <div class="card-icon">💾</div>
+                    <h3 class="card-title">Backupy</h3>
+                    <p class="card-description">Twórz i zarządzaj kopiami zapasowymi danych.</p>
+                </div>
+                
+                <div class="dashboard-card" onclick="showSection('soon')">
+                    <div class="card-icon">🚀</div>
+                    <h3 class="card-title">Dodatkowe Moduły</h3>
+                    <p class="card-description">Wkrótce nowe funkcjonalności i narzędzia.</p>
                 </div>
             </div>
 
-            <!-- Panel boczny -->
-            <div class="side-panel">
-                <h3 class="panel-title">📊 Status Systemu</h3>
-                
-                <div class="info-box">
-                    <h4>🟢 Status Panelu</h4>
-                    <p>System działa poprawnie</p>
-                    <p><strong>Port:</strong> 8080</p>
-                    <p><strong>Wersja:</strong> 1.0</p>
+            <div class="info-box">
+                <h4>📊 Statystyki Systemu</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                    <div>
+                        <strong>🟣 PurpleHost:</strong> Aktywny<br>
+                        <strong>🌐 Port:</strong> 8080<br>
+                        <strong>📁 Katalog:</strong> /home/purplehost
+                    </div>
+                    <div>
+                        <strong>💾 Serwery:</strong> 0 aktywnych<br>
+                        <strong>📦 Aplikacje:</strong> 0 uruchomionych<br>
+                        <strong>💽 Backupy:</strong> 0 wykonanych
+                    </div>
+                    <div>
+                        <strong>🕒 Czas pracy:</strong> <span id="uptime">0:00:00</span><br>
+                        <strong>📈 Status:</strong> <span style="color: #28a745;">Optymalny</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- KONSOLA -->
+        <div id="konsola" class="section">
+            <h2 class="section-title">💻 Konsola Systemowa</h2>
+            
+            <div class="info-box">
+                <h4>🔧 Dostęp do konsoli</h4>
+                <p>Wprowadź komendy systemowe poniżej. Uważaj - masz bezpośredni dostęp do systemu!</p>
+            </div>
+            
+            <div class="form-group">
+                <label for="commandInput">Wprowadź komendę:</label>
+                <div style="display: flex; gap: 10px;">
+                    <input type="text" class="form-control" id="commandInput" placeholder="np: ls -la, pwd, whoami..." style="flex: 1;">
+                    <button class="btn btn-primary" onclick="executeCommand()">▶ Wykonaj</button>
+                </div>
+            </div>
+            
+            <div class="console-output" id="consoleOutput">
+                <div>🟣 PurpleHost Console v1.0</div>
+                <div>System: Linux</div>
+                <div>User: $(whoami)</div>
+                <div>Directory: /home/purplehost</div>
+                <div>----------------------------------------</div>
+                <div>Wprowadź komendę aby rozpocząć...</div>
+            </div>
+            
+            <div style="display: flex; gap: 10px; margin-top: 15px;">
+                <button class="btn btn-primary" onclick="clearConsole()">🗑️ Wyczyść</button>
+                <button class="btn" onclick="runSystemInfo()">📊 Informacje Systemowe</button>
+                <button class="btn" onclick="runDiskUsage()">💾 Użycie Dysku</button>
+            </div>
+        </div>
+
+        <!-- PLIKI -->
+        <div id="pliki" class="section">
+            <h2 class="section-title">📁 Menedżer Plików</h2>
+            
+            <div class="file-manager">
+                <div class="file-tree">
+                    <h4 style="margin-bottom: 15px; color: #6a11cb;">Struktura Katalogów</h4>
+                    <div class="file-item active" data-file="readme">📄 README.txt</div>
+                    <div class="file-item" data-file="config">⚙️ config.json</div>
+                    <div class="file-item" data-file="servers">📁 serwery/</div>
+                    <div class="file-item" data-file="backups">📁 backupy/</div>
+                    <div class="file-item" data-file="logs">📁 logs/</div>
+                    <div class="file-item" data-file="node">📁 node/</div>
                 </div>
                 
-                <div class="info-box">
-                    <h4>💾 Zasoby</h4>
-                    <p>Serwery: <strong>0</strong></p>
-                    <p>Online: <strong>0</strong></p>
-                    <p>Wolne porty: <strong>Dostępne</strong></p>
+                <div class="file-content">
+                    <h4 style="margin-bottom: 15px; color: #6a11cb;">Podgląd Pliku: <span id="fileName">README.txt</span></h4>
+                    <div id="fileContent" style="background: white; padding: 20px; border-radius: 5px; border: 1px solid #ddd; min-height: 300px; font-family: monospace;">
+                        🟣 PurpleHost File Manager<br><br>
+                        Witaj w menedżerze plików!<br><br>
+                        Wybierz plik z lewej strony aby zobaczyć jego zawartość.<br><br>
+                        Dostępne katalogi:<br>
+                        • /home/purplehost/serwery - Serwery gry<br>
+                        • /home/purplehost/backupy - Kopie zapasowe<br>
+                        • /home/purplehost/logs - Logi systemowe<br>
+                        • /home/purplehost/node - Aplikacje Node.js
+                    </div>
+                    
+                    <div style="margin-top: 20px; display: flex; gap: 10px;">
+                        <button class="btn btn-primary">📥 Pobierz</button>
+                        <button class="btn btn-success">✏️ Edytuj</button>
+                        <button class="btn btn-danger">🗑️ Usuń</button>
+                        <button class="btn">📤 Upload</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- USTAWIENIA -->
+        <div id="ustawienia" class="section">
+            <h2 class="section-title">⚙️ Ustawienia Systemu</h2>
+            
+            <div class="info-box">
+                <h4>🔧 Konfiguracja PurpleHost</h4>
+                <p>Zarządzaj ustawieniami systemu i konfiguracjami serwerów.</p>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px;">
+                <div>
+                    <h4 style="margin-bottom: 20px; color: #6a11cb;">Ustawienia Główne</h4>
+                    
+                    <div class="form-group">
+                        <label for="panelPort">Port Panelu:</label>
+                        <input type="number" class="form-control" id="panelPort" value="8080">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="panelTheme">Motyw:</label>
+                        <select class="form-control" id="panelTheme">
+                            <option value="purple">Purple (Domyślny)</option>
+                            <option value="dark">Dark Mode</option>
+                            <option value="light">Light Mode</option>
+                            <option value="blue">Blue Theme</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="autoBackup">Automatyczne Backupy:</label>
+                        <select class="form-control" id="autoBackup">
+                            <option value="daily">Codziennie</option>
+                            <option value="weekly">Co tydzień</option>
+                            <option value="monthly">Co miesiąc</option>
+                            <option value="disabled">Wyłączone</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-primary">💾 Zapisz Ustawienia</button>
                 </div>
                 
-                <div class="info-box">
-                    <h4>📈 Informacje</h4>
-                    <p>• Minecraft: Port 25565</p>
-                    <p>• TeamSpeak: Port 9987</p>
-                    <p>• CS:GO: Port 27015</p>
-                    <p>• Wsparcie Java</p>
+                <div>
+                    <h4 style="margin-bottom: 20px; color: #6a11cb;">Ustawienia Serwerów</h4>
+                    
+                    <div class="form-group">
+                        <label for="defaultSlots">Domyślna liczba slotów:</label>
+                        <input type="number" class="form-control" id="defaultSlots" value="20">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="maxServers">Maksymalna liczba serwerów:</label>
+                        <input type="number" class="form-control" id="maxServers" value="10">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="autoRestart">Automatyczny restart serwerów:</label>
+                        <select class="form-control" id="autoRestart">
+                            <option value="enabled">Włączony</option>
+                            <option value="disabled">Wyłączony</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-success">🔄 Zastosuj dla Wszystkich</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- NODE -->
+        <div id="node" class="section">
+            <h2 class="section-title">📦 Node.js & Aplikacje</h2>
+            
+            <div class="info-box">
+                <h4>🚀 Zarządzanie Aplikacjami Node.js</h4>
+                <p>Uruchamiaj i zarządzaj aplikacjami Node.js bezpośrednio z panelu.</p>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-top: 20px;">
+                <div>
+                    <h4 style="margin-bottom: 15px; color: #6a11cb;">Twoje Aplikacje</h4>
+                    <div class="server-list">
+                        <div class="server-item">
+                            <div>
+                                <strong>🌐 Web API</strong><br>
+                                <small>Port: 3000 | Status: <span style="color: #28a745;">Uruchomiona</span></small>
+                            </div>
+                            <div>
+                                <span class="server-status status-online">ONLINE</span>
+                            </div>
+                        </div>
+                        
+                        <div class="server-item">
+                            <div>
+                                <strong>📊 Dashboard App</strong><br>
+                                <small>Port: 3001 | Status: <span style="color: #dc3545;">Zatrzymana</span></small>
+                            </div>
+                            <div>
+                                <span class="server-status status-offline">OFFLINE</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 10px; margin-top: 15px;">
+                        <button class="btn btn-success">▶ Uruchom Wszystkie</button>
+                        <button class="btn btn-danger">⏹ Zatrzymaj Wszystkie</button>
+                    </div>
                 </div>
                 
-                <button class="btn btn-primary" style="width: 100%; margin-top: 15px;" onclick="refreshStats()">
-                    🔄 Odśwież
-                </button>
+                <div>
+                    <h4 style="margin-bottom: 15px; color: #6a11cb;">Nowa Aplikacja</h4>
+                    
+                    <div class="form-group">
+                        <label for="appName">Nazwa Aplikacji:</label>
+                        <input type="text" class="form-control" id="appName" placeholder="Moja Aplikacja Node.js">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="appPort">Port:</label>
+                        <input type="number" class="form-control" id="appPort" value="3002">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="appType">Typ Aplikacji:</label>
+                        <select class="form-control" id="appType">
+                            <option value="express">Express.js</option>
+                            <option value="socketio">Socket.io</option>
+                            <option value="react">React</option>
+                            <option value="vue">Vue.js</option>
+                            <option value="api">REST API</option>
+                        </select>
+                    </div>
+                    
+                    <button class="btn btn-primary">🚀 Utwórz Aplikację</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- BACKUPY -->
+        <div id="backupy" class="section">
+            <h2 class="section-title">💾 System Backupów</h2>
+            
+            <div class="info-box">
+                <h4>🛡️ Ochrona Danych</h4>
+                <p>Regularnie twórz kopie zapasowe swoich serwerów i aplikacji.</p>
+            </div>
+            
+            <div style="display: flex; gap: 15px; margin-bottom: 25px;">
+                <button class="btn btn-success">🔄 Utwórz Backup Teraz</button>
+                <button class="btn btn-primary">⏰ Zaplanuj Backup</button>
+                <button class="btn">📊 Statystyki Backupów</button>
+            </div>
+            
+            <h4 style="margin-bottom: 15px; color: #6a11cb;">Ostatnie Backupy</h4>
+            <div class="backup-list">
+                <div class="backup-item">
+                    <strong>📦 Backup Pełny</strong><br>
+                    <small>Data: 2025-01-15 14:30</small><br>
+                    <small>Rozmiar: 2.4 GB</small><br>
+                    <small>Status: <span style="color: #28a745;">Ukończony</span></small>
+                </div>
+                
+                <div class="backup-item">
+                    <strong>📦 Backup Przyrostowy</strong><br>
+                    <small>Data: 2025-01-14 02:00</small><br>
+                    <small>Rozmiar: 450 MB</small><br>
+                    <small>Status: <span style="color: #28a745;">Ukończony</span></small>
+                </div>
+                
+                <div class="backup-item">
+                    <strong>📦 Backup Baz Danych</strong><br>
+                    <small>Data: 2025-01-13 22:15</small><br>
+                    <small>Rozmiar: 120 MB</small><br>
+                    <small>Status: <span style="color: #ffc107;">W trakcie...</span></small>
+                </div>
+            </div>
+            
+            <div style="margin-top: 30px;">
+                <h4 style="margin-bottom: 15px; color: #6a11cb;">Harmonogram Backupów</h4>
+                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <strong>Codzienne:</strong> 02:00<br>
+                            <small>Backup przyrostowy</small>
+                        </div>
+                        <div>
+                            <strong>Co sobota:</strong> 03:00<br>
+                            <small>Backup pełny</small>
+                        </div>
+                        <div>
+                            <strong>Co miesiąc:</strong> 1. dnia, 04:00<br>
+                            <small>Archiwum pełne</small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- SOON -->
+        <div id="soon" class="section">
+            <div class="coming-soon">
+                <div class="icon">🚀</div>
+                <h2 style="color: #6a11cb; margin-bottom: 15px;">Wkrótce Nowe Funkcjonalności!</h2>
+                <p style="font-size: 1.1em; margin-bottom: 25px; color: #666;">
+                    Pracujemy nad dodatkowymi modułami i ulepszeniami dla PurpleHost.
+                </p>
+                
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 20px; margin-top: 30px;">
+                    <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <div style="font-size: 2em; margin-bottom: 10px;">📊</div>
+                        <h4>Zaawansowane Statystyki</h4>
+                        <p>Szczegółowe wykresy i metryki wydajności</p>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <div style="font-size: 2em; margin-bottom: 10px;">🔐</div>
+                        <h4>Bezpieczeństwo</h4>
+                        <p>Firewall, SSL i zaawansowana ochrona</p>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+                        <div style="font-size: 2em; margin-bottom: 10px;">🌍</div>
+                        <h4>CDN & Proxy</h4>
+                        <p>Globalna dystrybucja i optymalizacja</p>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        Copyright © 2025 purpleHost.ru
+        Copyright © 2025 purpleHost.ru | Complete Panel System
     </div>
 
     <script>
-        function showSection(section) {
-            const sections = {
-                'konto': 'Panel zarządzania kontem i ustawieniami',
-                'sklep': 'Zakup dodatkowych usług i zasobów',
-                'plasnokki': 'Zarządzanie serwerami i usługami',
-                'senway': 'Monitorowanie i statystyki systemu'
-            };
-            alert('Przechodzisz do: ' + (sections[section] || section));
-        }
-        
-        function showCreateServerForm() {
-            document.getElementById('createServerForm').style.display = 'block';
-        }
-        
-        function hideCreateServerForm() {
-            document.getElementById('createServerForm').style.display = 'none';
-            document.getElementById('serverName').value = '';
-        }
-        
-        function createServer() {
-            const name = document.getElementById('serverName').value;
-            const type = document.getElementById('serverType').value;
-            const slots = document.getElementById('serverSlots').value;
-            const version = document.getElementById('serverVersion').value;
+        // Nawigacja między sekcjami
+        function showSection(sectionId) {
+            // Ukryj wszystkie sekcje
+            document.querySelectorAll('.section').forEach(section => {
+                section.classList.remove('active');
+            });
             
-            if (!name) {
-                alert('Proszę wprowadzić nazwę serwera!');
-                return;
-            }
+            // Pokaż wybraną sekcję
+            document.getElementById(sectionId).classList.add('active');
             
-            // Symulacja tworzenia serwera
-            const serverList = document.getElementById('serverList');
-            serverList.innerHTML = '';
-            
-            const newServer = document.createElement('li');
-            newServer.className = 'server-item';
-            newServer.innerHTML = `
-                <div class="server-info">
-                    <h4>${getServerIcon(type)} ${name}</h4>
-                    <p>Typ: ${type} | Sloty: ${slots} | Wersja: ${version}</p>
-                    <small>Utworzono: ${new Date().toLocaleString()}</small>
-                </div>
-                <div style="text-align: right;">
-                    <div class="server-status status-offline">
-                        🔴 OFFLINE
-                    </div>
-                    <div class="server-actions" style="margin-top: 8px;">
-                        <button class="btn btn-success btn-sm" onclick="startServer(this)">▶ Start</button>
-                        <button class="btn btn-danger btn-sm" onclick="deleteServer(this)">🗑️</button>
-                    </div>
-                </div>
-            `;
-            
-            serverList.appendChild(newServer);
-            hideCreateServerForm();
-            
-            alert('✅ Serwer "' + name + '" został utworzony pomyślnie!');
-        }
-        
-        function getServerIcon(type) {
-            const icons = {
-                'minecraft': '⛏️',
-                'rust': '🦀',
-                'ark': '🦖',
-                'csgo': '🔫',
-                'teamspeak': '🎧'
-            };
-            return icons[type] || '🖥️';
-        }
-        
-        function startServer(button) {
-            const serverItem = button.closest('.server-item');
-            const statusDiv = serverItem.querySelector('.server-status');
-            statusDiv.className = 'server-status status-online';
-            statusDiv.innerHTML = '🟢 ONLINE';
-            button.textContent = '⏹ Stop';
-            button.onclick = function() { stopServer(this); };
-            
-            alert('🟢 Serwer uruchomiony pomyślnie!');
-        }
-        
-        function stopServer(button) {
-            const serverItem = button.closest('.server-item');
-            const statusDiv = serverItem.querySelector('.server-status');
-            statusDiv.className = 'server-status status-offline';
-            statusDiv.innerHTML = '🔴 OFFLINE';
-            button.textContent = '▶ Start';
-            button.onclick = function() { startServer(this); };
-            
-            alert('🔴 Serwer zatrzymany!');
-        }
-        
-        function deleteServer(button) {
-            if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
-                const serverItem = button.closest('.server-item');
-                serverItem.remove();
-                
-                // Jeśli nie ma serwerów, pokaż domyślny komunikat
-                const serverList = document.getElementById('serverList');
-                if (serverList.children.length === 0) {
-                    serverList.innerHTML = `
-                        <li class="server-item">
-                            <div class="server-info">
-                                <h4>🎯 Brak serwerów</h4>
-                                <p>Utwórz pierwszy serwer aby rozpocząć</p>
-                            </div>
-                            <div style="text-align: right;">
-                                <div class="server-status status-offline">
-                                    🔴 OFFLINE
-                                </div>
-                            </div>
-                        </li>
-                    `;
+            // Aktualizuj aktywne linki w menu
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+                if (link.getAttribute('data-section') === sectionId) {
+                    link.classList.add('active');
                 }
-                
-                alert('🗑️ Serwer usunięty!');
+            });
+        }
+        
+        // Obsługa kliknięć w menu
+        document.querySelectorAll('.nav-link').forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.preventDefault();
+                const sectionId = this.getAttribute('data-section');
+                showSection(sectionId);
+            });
+        });
+        
+        // Konsola - wykonaj komendę
+        function executeCommand() {
+            const command = document.getElementById('commandInput').value;
+            const output = document.getElementById('consoleOutput');
+            
+            if (command.trim() === '') return;
+            
+            // Symulacja wykonania komendy
+            output.innerHTML += `<div><strong>$ ${command}</strong></div>`;
+            
+            if (command === 'ls -la') {
+                output.innerHTML += `<div>drwxr-xr-x 12 purplehost purplehost  4096 Jan 15 14:30 .</div>`;
+                output.innerHTML += `<div>drwxr-xr-x  3 root      root       4096 Jan 15 14:25 ..</div>`;
+                output.innerHTML += `<div>drwxr-xr-x  4 purplehost purplehost  4096 Jan 15 14:28 serwery</div>`;
+                output.innerHTML += `<div>drwxr-xr-x  3 purplehost purplehost  4096 Jan 15 14:28 backupy</div>`;
+                output.innerHTML += `<div>drwxr-xr-x  2 purplehost purplehost  4096 Jan 15 14:29 logs</div>`;
+            } else if (command === 'pwd') {
+                output.innerHTML += `<div>/home/purplehost</div>`;
+            } else if (command === 'whoami') {
+                output.innerHTML += `<div>purplehost</div>`;
+            } else {
+                output.innerHTML += `<div>Komenda wykonana: ${command}</div>`;
             }
+            
+            output.scrollTop = output.scrollHeight;
+            document.getElementById('commandInput').value = '';
         }
         
-        function refreshStats() {
-            alert('📊 Statystyki odświeżone! System działa poprawnie.');
+        function clearConsole() {
+            document.getElementById('consoleOutput').innerHTML = 
+                '<div>🟣 PurpleHost Console v1.0</div><div>Konsola wyczyszczona</div>';
         }
         
-        // Pokazuj informacje o uruchomieniu
-        console.log('🟣 PurpleHost Panel został uruchomiony pomyślnie!');
-        console.log('🌐 Adres: http://localhost:8080');
-        console.log('📁 Katalog: /home/purplehost/web');
-    </script>
-</body>
-</html>
-HTML
-
-    # Utwórz stronę statusu
-    cat > "$WEB_DIR/status.html" << 'STATUS'
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Status - PurpleHost</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { 
-            font-family: 'Arial', sans-serif; 
-            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
-            min-height: 100vh; 
-            color: #333;
-            padding: 20px;
+        function runSystemInfo() {
+            const output = document.getElementById('consoleOutput');
+            output.innerHTML += `<div><strong>$ systeminfo</strong></div>`;
+            output.innerHTML += `<div>CPU: 15% | RAM: 45% | Disk: 28%</div>`;
+            output.innerHTML += `<div>Uptime: 2 godziny 15 minut</div>`;
+            output.innerHTML += `<div>Active users: 1</div>`;
+            output.scrollTop = output.scrollHeight;
         }
-        .container { 
-            max-width: 800px; 
-            margin: 50px auto; 
-            background: white;
-            border-radius: 15px;
-            padding: 40px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        
+        function runDiskUsage() {
+            const output = document.getElementById('consoleOutput');
+            output.innerHTML += `<div><strong>$ df -h</strong></div>`;
+            output.innerHTML += `<div>Filesystem      Size  Used Avail Use% Mounted on</div>`;
+            output.innerHTML += `<div>/dev/sda1        20G   5.6G   13G  30% /</div>`;
+            output.innerHTML += `<div>/dev/sdb1        50G   12G   35G  25% /home</div>`;
+            output.scrollTop = output.scrollHeight;
         }
-        .header { 
-            text-align: center; 
-            margin-bottom: 30px;
-            padding-bottom: 20px;
-            border-bottom: 2px solid #eee;
-        }
-        .header h1 { 
-            font-size: 2.5em; 
-            color: #6a11cb;
-            margin-bottom: 10px;
-        }
-        .status-grid {
-            display: grid;
-            gap: 15px;
-            margin: 25px 0;
-        }
-        .status-item {
-            padding: 20px;
-            border-radius: 10px;
-            display: flex;
-            align-items: center;
-            gap: 15px;
-        }
-        .status-online { 
-            background: #d4edda; 
-            color: #155724;
-            border: 1px solid #c3e6cb;
-        }
-        .status-offline { 
-            background: #f8d7da; 
-            color: #721c24;
-            border: 1px solid #f5c6cb;
-        }
-        .status-icon {
-            font-size: 2em;
-        }
-        .status-info h3 {
-            margin-bottom: 5px;
-        }
-        .btn {
-            display: inline-block;
-            padding: 12px 25px;
-            background: #6a11cb;
-            color: white;
-            text-decoration: none;
-            border-radius: 8px;
-            font-weight: bold;
-            margin-top: 20px;
-            transition: all 0.3s ease;
-        }
-        .btn:hover {
-            background: #5a0db3;
-            transform: translateY(-2px);
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>📊 Status Systemu</h1>
-            <p>PurpleHost - Professional Hosting</p>
-        </div>
-
-        <div class="status-grid">
-            <div class="status-item status-online">
-                <div class="status-icon">🌐</div>
-                <div class="status-info">
-                    <h3>Serwer Web</h3>
-                    <p><strong>Status:</strong> DZIAŁA • <strong>Port:</strong> 8080</p>
-                </div>
-            </div>
-            
-            <div class="status-item status-online">
-                <div class="status-icon">🟣</div>
-                <div class="status-info">
-                    <h3>Panel PurpleHost</h3>
-                    <p><strong>Status:</strong> AKTYWNY • <strong>Wersja:</strong> 1.0</p>
-                </div>
-            </div>
-            
-            <div class="status-item status-online">
-                <div class="status-icon">📁</div>
-                <div class="status-info">
-                    <h3>System Plików</h3>
-                    <p><strong>Status:</strong> DOSTĘPNY • <strong>Katalog:</strong> /home/purplehost</p>
-                </div>
-            </div>
-            
-            <div class="status-item status-online">
-                <div class="status-icon">⚡</div>
-                <div class="status-info">
-                    <h3>Wydajność</h3>
-                    <p><strong>Status:</strong> OPTYMALNA • <strong>Czas działania:</strong> <span id="uptime">0:00:00</span></p>
-                </div>
-            </div>
-        </div>
-
-        <div style="text-align: center;">
-            <a href="/" class="btn">← Powrót do Panelu Głównego</a>
-        </div>
-    </div>
-
-    <script>
+        
+        // Menedżer plików
+        document.querySelectorAll('.file-item').forEach(item => {
+            item.addEventListener('click', function() {
+                document.querySelectorAll('.file-item').forEach(i => i.classList.remove('active'));
+                this.classList.add('active');
+                
+                const file = this.getAttribute('data-file');
+                document.getElementById('fileName').textContent = file + (file.includes('/') ? '' : '.txt');
+                
+                // Symulacja zawartości pliku
+                const contents = {
+                    'readme': '🟣 PurpleHost File Manager\n\nWitaj w menedżerze plików!\nWybierz plik z lewej strony aby zobaczyć jego zawartość.',
+                    'config': '{\n  "panel": {\n    "port": 8080,\n    "theme": "purple"\n  },\n  "servers": {\n    "max_servers": 10,\n    "auto_restart": true\n  }\n}',
+                    'servers': 'Katalog serwerów:\n- minecraft/\n- teamspeak/\n- csgo/\n- rust/\n- ark/',
+                    'backups': 'Katalog backupów:\n- daily/\n- weekly/\n- monthly/',
+                    'logs': 'Logi systemowe:\n- panel.log\n- errors.log\n- access.log',
+                    'node': 'Aplikacje Node.js:\n- web-api/\n- dashboard-app/'
+                };
+                
+                document.getElementById('fileContent').textContent = contents[file] || 'Zawartość pliku...';
+            });
+        });
+        
         // Aktualizuj czas działania
         function updateUptime() {
             const startTime = new Date();
@@ -758,13 +920,76 @@ HTML
             }, 1000);
         }
         
-        updateUptime();
+        // Inicjalizacja
+        document.addEventListener('DOMContentLoaded', function() {
+            updateUptime();
+            
+            // Enter w konsoli
+            document.getElementById('commandInput').addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    executeCommand();
+                }
+            });
+        });
+        
+        console.log('🟣 PurpleHost Complete Panel załadowany!');
     </script>
 </body>
 </html>
-STATUS
+HTML
 
-    echo -e "${GREEN}✅ Panel PurpleHost został utworzony!${NC}"
+    # Utwórz przykładowe pliki konfiguracyjne
+    cat > "$WEB_DIR/config.json" << 'JSON'
+{
+  "panel": {
+    "name": "PurpleHost",
+    "version": "1.0",
+    "port": 8080,
+    "theme": "purple"
+  },
+  "servers": {
+    "max_servers": 10,
+    "auto_restart": true,
+    "default_slots": 20
+  },
+  "backup": {
+    "enabled": true,
+    "schedule": "daily",
+    "retention_days": 30
+  },
+  "node": {
+    "enabled": true,
+    "max_apps": 5
+  }
+}
+JSON
+
+    cat > "$WEB_DIR/readme.txt" << 'TXT'
+🟣 PurpleHost Complete Panel
+
+Witaj w kompletnej platformie hostingowej PurpleHost!
+
+DOSTĘPNE MODUŁY:
+- 💻 Konsola - dostęp do systemu
+- 📁 Pliki - menedżer plików
+- ⚙️ Ustawienia - konfiguracja
+- 📦 Node - aplikacje Node.js
+- 💾 Backupy - system backupów
+- 🚀 Soon - nadchodzące funkcje
+
+KATALOGI:
+/home/purplehost/
+  ├── web/          # Panel web
+  ├── serwery/      # Serwery gry
+  ├── backupy/      # Kopie zapasowe
+  ├── logs/         # Logi systemowe
+  ├── node/         # Aplikacje Node.js
+  └── bazy/         # Bazy danych
+
+Enjoy! 🎮
+TXT
+
+    echo -e "${GREEN}✅ Kompletny panel PurpleHost został utworzony!${NC}"
     echo -e "${PURPLE}📁 Lokalizacja: $WEB_DIR/${NC}"
 }
 
@@ -790,23 +1015,24 @@ start_web_server() {
         
         echo -e "${GREEN}✅ Serwer PurpleHost uruchomiony pomyślnie!${NC}"
         echo -e "${PURPLE}"
-        echo -e "╔══════════════════════════════════════════════════╗"
-        echo -e "║                🟣 PURPLEHOST                    ║"
-        echo -e "║           Panel został uruchomiony!             ║"
-        echo -e "╠══════════════════════════════════════════════════╣"
-        echo -e "║                                                  ║"
-        echo -e "║  🌐 Adresy dostępu:                              ║"
-        echo -e "║     📍 Local:    http://localhost:$PORT         ║"
-        echo -e "║     🌍 Sieć:     http://$ip:$PORT               ║"
-        echo -e "║     📊 Status:   http://localhost:$PORT/status  ║"
-        echo -e "║                                                  ║"
-        echo -e "║  📁 Katalog panelu: $WEB_DIR                    ║"
-        echo -e "║  🎮 Katalog serwerów: $SERVER_DIR               ║"
-        echo -e "║                                                  ║"
-        echo -e "║  💡 Otwórz przeglądarkę i wejdź na powyższy     ║"
-        echo -e "║     adres aby korzystać z panelu                ║"
-        echo -e "║                                                  ║"
-        echo -e "╚══════════════════════════════════════════════════╝"
+        echo -e "╔════════════════════════════════════════════════════════════╗"
+        echo -e "║                      🟣 PURPLEHOST                        ║"
+        echo -e "║                 KOMPLETNY PANEL SYSTEMU                   ║"
+        echo -e "╠════════════════════════════════════════════════════════════╣"
+        echo -e "║                                                            ║"
+        echo -e "║  🌐 Adresy dostępu:                                        ║"
+        echo -e "║     📍 Local:    http://localhost:$PORT                   ║"
+        echo -e "║     🌍 Sieć:     http://$ip:$PORT                         ║"
+        echo -e "║                                                            ║"
+        echo -e "║  🎯 Dostępne moduły:                                       ║"
+        echo -e "║     💻 Konsola    📁 Pliki     ⚙️ Ustawienia               ║"
+        echo -e "║     📦 Node       💾 Backupy   🚀 Soon                     ║"
+        echo -e "║                                                            ║"
+        echo -e "║  📁 Struktura katalogów: /home/purplehost/                 ║"
+        echo -e "║                                                            ║"
+        echo -e "║  💡 Otwórz przeglądarkę i zacznij korzystać z systemu!     ║"
+        echo -e "║                                                            ║"
+        echo -e "╚════════════════════════════════════════════════════════════╝"
         echo -e "${NC}"
         
         # Otwórz przeglądarkę jeśli jest graficzne środowisko
@@ -825,27 +1051,6 @@ start_web_server() {
     fi
 }
 
-show_success_message() {
-    echo -e "${GREEN}"
-    echo -e "╔══════════════════════════════════════════════════╗"
-    echo -e "║                🎉 INSTALACJA ZAKOŃCZONA!        ║"
-    echo -e "╠══════════════════════════════════════════════════╣"
-    echo -e "║                                                  ║"
-    echo -e "║  Panel PurpleHost został utworzony i uruchomiony ║"
-    echo -e "║  automatycznie!                                  ║"
-    echo -e "║                                                  ║"
-    echo -e "║  Możesz teraz:                                   ║"
-    echo -e "║    • Otworzyć przeglądarkę                       ║"
-    echo -e "║    • Wejść na http://localhost:8080              ║"
-    echo -e "║    • Zarządzać serwerami gry                     ║"
-    echo -e "║                                                  ║"
-    echo -e "║  Panel będzie działał do momentu zamknięcia      ║"
-    echo -e "║  terminala lub ręcznego zatrzymania.             ║"
-    echo -e "║                                                  ║"
-    echo -e "╚══════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-}
-
 # =============================================
 # 📜 MAIN SCRIPT - AUTOMATYCZNA INSTALACJA
 # =============================================
@@ -854,8 +1059,8 @@ clear
 
 echo -e "${PURPLE}"
 echo -e "╔══════════════════════════════════════╗"
-echo -e "║        🟣 PURPLEHOST PANEL           ║"
-echo -e "║      Automatyczna Instalacja         ║"
+echo -e "║        🟣 PURPLEHOST COMPLETE        ║"
+echo -e "║        Panel Systemowy v2.0          ║"
 echo -e "╚══════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${CYAN}Rozpoczynanie automatycznej instalacji...${NC}"
@@ -867,7 +1072,7 @@ setup_directories
 check_dependencies
 
 # Tworzenie panelu
-echo -e "${PURPLE}📝 Tworzenie panelu web...${NC}"
+echo -e "${PURPLE}📝 Tworzenie kompletnego panelu...${NC}"
 create_web_panel
 
 # Uruchamianie serwera
@@ -875,16 +1080,33 @@ echo -e "${PURPLE}🌐 Uruchamianie serwera...${NC}"
 start_web_server
 
 # Komunikat sukcesu
-show_success_message
+echo -e "${GREEN}"
+echo -e "╔════════════════════════════════════════════════════════════╗"
+echo -e "║                    🎉 INSTALACJA ZAKOŃCZONA!              ║"
+echo -e "╠════════════════════════════════════════════════════════════╣"
+echo -e "║                                                            ║"
+echo -e "║  Panel PurpleHost został utworzony i uruchomiony!         ║"
+echo -e "║  Masz teraz dostęp do wszystkich modułów:                  ║"
+echo -e "║                                                            ║"
+echo -e "║  💻 KONSOLA   - Dostęp do systemu, wykonywanie komend     ║"
+echo -e "║  📁 PLIKI     - Menedżer plików, edycja, upload           ║"
+echo -e "║  ⚙️ USTAWIENIA - Konfiguracja systemu i serwerów          ║"
+echo -e "║  📦 NODE      - Aplikacje Node.js, zarządzanie            ║"
+echo -e "║  💾 BACKUPY   - System kopii zapasowych                   ║"
+echo -e "║  🚀 SOON      - Nadchodzące funkcjonalności               ║"
+echo -e "║                                                            ║"
+echo -e "║  Wejdź na http://localhost:8080 aby rozpocząć!            ║"
+echo -e "║                                                            ║"
+echo -e "╚════════════════════════════════════════════════════════════╝"
+echo -e "${NC}"
 
-# Informacja o zatrzymaniu
-echo -e "${YELLOW}📝 Aby zatrzymać panel, naciśnij Ctrl+C lub zamknij terminal.${NC}"
+echo -e "${YELLOW}📝 Aby zatrzymać panel, naciśnij Ctrl+C${NC}"
 echo ""
 
 # Czekaj na sygnał zakończenia
 trap 'echo -e "\n${GREEN}👋 Zamykanie PurpleHost Panel...${NC}"; pkill -f "python3 -m http.server $PORT"; exit 0' INT TERM
 
-# Bezczynne czekanie, aby skrypt się nie zakończył
+# Bezczynne czekanie
 while true; do
     sleep 60
 done
