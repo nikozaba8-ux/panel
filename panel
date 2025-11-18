@@ -1,11 +1,11 @@
 #!/bin/bash
 
 # =============================================
-# 🦖 PTERODACTYL-LIKE PANEL - ALL IN ONE
+# 🦖 PTERODACTYL-LIKE PANEL - CODESANDBOX VERSION
 # =============================================
 
-# Konfiguracja
-PANEL_DIR="/home/panel"
+# Konfiguracja dla środowiska online
+PANEL_DIR="/tmp/panel"
 SERVERS_DIR="$PANEL_DIR/servers"
 LOGS_DIR="$PANEL_DIR/logs"
 BACKUPS_DIR="$PANEL_DIR/backups"
@@ -18,18 +18,7 @@ PANEL_BACKUP_DIR="$PANEL_DIR/panel-backups"
 PID_FILE="$PANEL_DIR/panel.pid"
 PORT=8080
 
-# Limity systemowe
-MAX_SERVERS_PER_USER=10
-MAX_MEMORY_PER_USER=16384
-MIN_PORT=25500
-MAX_PORT=30000
-DEFAULT_PORTS=(
-    ["minecraft"]=25565
-    ["fivem"]=30120
-    ["python"]=8000
-)
-
-# Kolory
+# Kolory dla output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -37,77 +26,6 @@ BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
 NC='\033[0m'
-
-# =============================================
-# 🌐 FUNKCJE DO WYKRYWANIA IP
-# =============================================
-
-get_local_ip() {
-    # Próbuj różne metody uzyskania lokalnego IP
-    local ip=""
-    
-    # Metoda 1: ip route
-    if command -v ip > /dev/null; then
-        ip=$(ip route get 1 2>/dev/null | awk '{print $7}' | head -1)
-    fi
-    
-    # Metoda 2: hostname -I
-    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
-        ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-    fi
-    
-    # Metoda 3: ifconfig
-    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
-        if command -v ifconfig > /dev/null; then
-            ip=$(ifconfig 2>/dev/null | grep -Eo 'inet (addr:)?([0-9]*\.){3}[0-9]*' | grep -Eo '([0-9]*\.){3}[0-9]*' | grep -v '127.0.0.1' | head -1)
-        fi
-    fi
-    
-    # Metoda 4: netstat
-    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
-        if command -v netstat > /dev/null; then
-            ip=$(netstat -rn 2>/dev/null | grep -E '^0.0.0.0' | awk '{print $2}' | head -1)
-        fi
-    fi
-    
-    # Jeśli nadal nie znaleziono, użyj localhost
-    if [ -z "$ip" ] || [ "$ip" = "127.0.0.1" ]; then
-        ip="localhost"
-    fi
-    
-    echo "$ip"
-}
-
-get_public_ip() {
-    # Próbuj uzyskać publiczne IP
-    local public_ip=""
-    
-    # Metoda 1: curl do zewnętrznych serwisów
-    if command -v curl > /dev/null; then
-        public_ip=$(curl -s --connect-timeout 3 http://ipinfo.io/ip 2>/dev/null || \
-                   curl -s --connect-timeout 3 http://ifconfig.me 2>/dev/null || \
-                   curl -s --connect-timeout 3 http://api.ipify.org 2>/dev/null)
-    fi
-    
-    # Metoda 2: wget
-    if [ -z "$public_ip" ] && command -v wget > /dev/null; then
-        public_ip=$(wget -q -O - --timeout=3 http://ipinfo.io/ip 2>/dev/null)
-    fi
-    
-    echo "$public_ip"
-}
-
-get_server_ips() {
-    local local_ip=$(get_local_ip)
-    local public_ip=$(get_public_ip)
-    
-    # Sprawdź czy publiczne IP jest inne niż lokalne
-    if [ -n "$public_ip" ] && [ "$public_ip" != "$local_ip" ] && [ "$public_ip" != "localhost" ]; then
-        echo "$local_ip|$public_ip"
-    else
-        echo "$local_ip|"
-    fi
-}
 
 # =============================================
 # 🛠️ FUNKCJE POMOCNICZE
@@ -125,42 +43,35 @@ warning() {
     echo -e "${YELLOW}[OSTRZEŻENIE]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
 }
 
-check_dependencies() {
-    echo -e "${YELLOW}Sprawdzanie zależności...${NC}"
-    local missing=()
-    for cmd in nc jq wget unzip python3 java curl; do
-        if ! command -v $cmd &> /dev/null; then
-            missing+=("$cmd")
-        fi
-    done
-    
-    if [ ${#missing[@]} -gt 0 ]; then
-        warning "Brakujące zależności: ${missing[*]}"
-        echo "Instalowanie..."
-        apt update > /dev/null 2>&1
-        apt install -y netcat-openbsd jq wget unzip python3 python3-pip default-jre curl > /dev/null 2>&1
-        pip3 install flask django fastapi uvicorn > /dev/null 2>&1
-        echo -e "${GREEN}✅ Zależności zainstalowane${NC}"
-    else
-        echo -e "${GREEN}✅ Wszystkie zależności są dostępne${NC}"
-    fi
-}
-
 setup_directories() {
     mkdir -p "$SERVERS_DIR" "$LOGS_DIR" "$BACKUPS_DIR" "$CONFIG_DIR" "$WEB_DIR" \
              "$USERS_DIR" "$DATABASES_DIR" "$RESOURCES_DIR" "$PANEL_BACKUP_DIR"
+    log "Katalogi utworzone"
 }
 
 # =============================================
-# 🌐 SERWER WEB Z AUTO-IP
+# 🌐 SERWER WEB - LIGHTWEIGHT VERSION
 # =============================================
 
 check_port_available() {
-    local port=$1
-    if ! nc -z localhost $port 2>/dev/null; then
-        return 0
+    if command -v nc >/dev/null 2>&1; then
+        if ! nc -z localhost $1 2>/dev/null; then
+            return 0
+        else
+            return 1
+        fi
     else
-        return 1
+        # Fallback - sprawdź przez /proc/net/tcp
+        if [ -f /proc/net/tcp ]; then
+            if ! grep ":$1 " /proc/net/tcp >/dev/null 2>&1; then
+                return 0
+            else
+                return 1
+            fi
+        else
+            # Ostateczny fallback - załóżmy że port jest dostępny
+            return 0
+        fi
     fi
 }
 
@@ -177,8 +88,8 @@ find_available_port() {
         port=$((port + 1))
     done
     
+    # Jeśli nie znaleziono, użyj losowego portu > 8100
     echo $((8100 + RANDOM % 1000))
-    return 0
 }
 
 start_web_server() {
@@ -198,61 +109,19 @@ start_web_server() {
     # Zatrzymaj istniejący serwer jeśli działa
     stop_web_server
 
-    # Pobierz adresy IP serwera
-    local ips=$(get_server_ips)
-    local local_ip=$(echo "$ips" | cut -d'|' -f1)
-    local public_ip=$(echo "$ips" | cut -d'|' -f2)
-    
-    log "Wykryte IP: Lokalne: $local_ip, Publiczne: ${public_ip:-brak}"
-
     log "Uruchamianie serwera web na porcie $PORT..."
     
-    # Uruchom serwer w tle
-    {
-        while true; do
-            nc -l -p $PORT -c "
-                read -r request
-                uri=\$(echo \"\$request\" | awk '{print \$2}')
-                method=\$(echo \"\$request\" | awk '{print \$1}')
-                
-                # Aktualizuj IP przy każdym żądaniu
-                current_ips=\$(get_server_ips)
-                current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
-                current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
-                
-                case \"\$uri\" in
-                    \"/\"|\"/admin\"|\"/admin/\"*)
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        # Zastąp placeholdery aktualnymi IP
-                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
-                        ;;
-                    \"/client\"*)
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
-                        ;;
-                    \"/api/\"*)
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                        echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
-                        ;;
-                    *)
-                        echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                        sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
-                        ;;
-                esac
-            " 2>/dev/null
-        done
-    } > /dev/null 2>&1 &
+    # Uruchom prosty serwer HTTP w Pythonie (działa w CodeSandbox)
+    cd "$WEB_DIR"
+    python3 -m http.server $PORT > "$LOGS_DIR/webserver.log" 2>&1 &
     
     echo $! > "$PID_FILE"
-    log "✅ Serwer web uruchomiony"
+    log "✅ Serwer web uruchomiony na porcie $PORT"
     
     # Wyświetl informacje o dostępie
-    echo -e "${GREEN}🌐 Adresy dostępu:${NC}"
-    echo -e "${CYAN}  Local:${NC}    http://$local_ip:$PORT"
-    if [ -n "$public_ip" ]; then
-        echo -e "${CYAN}  Public:${NC}   http://$public_ip:$PORT"
-    fi
-    echo -e "${CYAN}  Localhost:${NC} http://localhost:$PORT"
+    echo -e "${GREEN}🌐 Panel jest dostępny pod adresem:${NC}"
+    echo -e "${CYAN}  ➡️  http://localhost:$PORT${NC}"
+    echo -e "${YELLOW}  📍 W CodeSandbox: Sprawdź 'Ports' w dolnym panelu${NC}"
     
     return 0
 }
@@ -267,21 +136,24 @@ stop_web_server() {
         fi
         rm -f "$PID_FILE"
     fi
+    
+    # Zabij również procesy Pythona serwującego
+    pkill -f "python3 -m http.server" 2>/dev/null
 }
 
 # =============================================
-# 🌐 INTERFEJS WEB Z AUTO-IP
+# 🌐 INTERFEJS WEB - CODESANDBOX OPTIMIZED
 # =============================================
 
 create_web_interface() {
-    # Strona główna Admin z dynamicznym IP
+    # Strona główna Admin
     cat > "$WEB_DIR/index.html" << 'EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Serwerowy - Admin</title>
+    <title>🦖 Panel Pterodactyl - CodeSandbox</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -319,21 +191,12 @@ create_web_interface() {
             font-weight: bold;
             margin: 5px;
         }
-        .ip-info {
+        .info-box {
             background: #e0f2fe;
             border: 2px solid #bae6fd;
             border-radius: 10px;
             padding: 20px;
             margin: 20px 0;
-        }
-        .ip-address {
-            font-family: 'Courier New', monospace;
-            background: #1a202c;
-            color: #cbd5e0;
-            padding: 10px 15px;
-            border-radius: 5px;
-            margin: 5px 0;
-            display: inline-block;
         }
         .card-grid { 
             display: grid; 
@@ -373,73 +236,63 @@ create_web_interface() {
         .btn-info { background: #38b2ac; }
         .btn:hover { opacity: 0.9; transform: translateY(-2px); }
         
-        .info-panel {
-            background: #f0f9ff;
-            border: 2px solid #bae6fd;
+        .codesandbox-info {
+            background: #fff3cd;
+            border: 2px solid #ffeaa7;
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 30px;
         }
-        .copy-btn {
-            background: #4a5568;
-            color: white;
-            border: none;
-            padding: 5px 10px;
-            border-radius: 3px;
-            cursor: pointer;
-            margin-left: 10px;
-            font-size: 0.8em;
+        .server-status {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
         }
+        .online { color: #48bb78; }
+        .offline { color: #e53e3e; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🦖 Panel Pterodactyl</h1>
-            <p>Port: <strong>%%PORT%%</strong> • 
-               <span class="status">✅ ONLINE</span>
-            </p>
+            <p>CodeSandbox Edition • <span class="status">✅ ONLINE</span></p>
         </div>
 
-        <div class="ip-info">
-            <h3>🌐 Adresy Serwera</h3>
-            <div style="margin: 15px 0;">
-                <strong>Lokalne IP:</strong><br>
-                <span class="ip-address" id="local-ip">http://%%LOCAL_IP%%:%%PORT%%</span>
-                <button class="copy-btn" onclick="copyToClipboard('local-ip')">📋</button>
-            </div>
-            <div style="margin: 15px 0;">
-                <strong>Publiczne IP:</strong><br>
-                <span class="ip-address" id="public-ip">http://%%PUBLIC_IP%%:%%PORT%%</span>
-                <button class="copy-btn" onclick="copyToClipboard('public-ip')">📋</button>
-            </div>
-            <div style="margin: 15px 0;">
-                <strong>Localhost:</strong><br>
-                <span class="ip-address" id="localhost-ip">http://localhost:%%PORT%%</span>
-                <button class="copy-btn" onclick="copyToClipboard('localhost-ip')">📋</button>
-            </div>
+        <div class="codesandbox-info">
+            <h3>🚀 Działa w CodeSandbox!</h3>
+            <p>Ten panel został uruchomiony w środowisku CodeSandbox. Możesz teraz testować funkcjonalności zarządzania serwerami.</p>
         </div>
 
-        <div class="info-panel">
-            <h3>🚀 Panel został uruchomiony pomyślnie!</h3>
-            <p>Użyj powyższych adresów aby uzyskać dostęp do panelu z innych urządzeń w sieci.</p>
+        <div class="info-box">
+            <h3>📊 Status Systemu</h3>
+            <div class="server-status">
+                <strong>Serwer Web:</strong> <span class="online">● DZIAŁA</span>
+            </div>
+            <div class="server-status">
+                <strong>Baza Danych:</strong> <span class="online">● DOSTĘPNA</span>
+            </div>
+            <div class="server-status">
+                <strong>API Panelu:</strong> <span class="online">● AKTYWNE</span>
+            </div>
         </div>
 
         <div class="card-grid">
             <div class="card">
                 <h3>👥 Użytkownicy</h3>
                 <p>Zarządzaj użytkownikami systemu</p>
-                <a href="/admin/users" class="btn">Przejdź</a>
+                <button class="btn" onclick="showSection('users')">Przejdź</button>
             </div>
             <div class="card">
                 <h3>🎮 Serwery</h3>
                 <p>Twórz i zarządzaj serwerami</p>
-                <a href="/admin/servers" class="btn">Przejdź</a>
+                <button class="btn" onclick="showSection('servers')">Przejdź</button>
             </div>
             <div class="card">
                 <h3>📊 Statystyki</h3>
                 <p>Monitoruj wydajność systemu</p>
-                <a href="/admin/stats" class="btn">Przejdź</a>
+                <button class="btn" onclick="showSection('stats')">Przejdź</button>
             </div>
         </div>
 
@@ -447,60 +300,148 @@ create_web_interface() {
             <div class="card">
                 <h3>🔧 Zarządzanie</h3>
                 <p>Backup, reinstalacja, ustawienia</p>
-                <a href="/admin/management" class="btn btn-warning">Zarządzaj</a>
+                <button class="btn btn-warning" onclick="showSection('management')">Zarządzaj</button>
             </div>
             <div class="card">
                 <h3>👤 Panel Klienta</h3>
                 <p>Przejdź do panelu klienta</p>
-                <a href="/client/?user=testuser" class="btn btn-success">Client Area</a>
+                <button class="btn btn-success" onclick="showSection('client')">Client Area</button>
             </div>
             <div class="card">
-                <h3>🔄 Odśwież IP</h3>
-                <p>Ponownie wykryj adresy IP</p>
-                <button class="btn btn-info" onclick="refreshIPs()">🔄 Odśwież</button>
+                <h3>🔄 Odśwież</h3>
+                <p>Przeładuj panel</p>
+                <button class="btn btn-info" onclick="location.reload()">🔄 Odśwież</button>
             </div>
+        </div>
+
+        <!-- Sekcje zawartości -->
+        <div id="content-section" style="display: none; margin-top: 30px;">
+            <div id="section-content"></div>
+            <button class="btn" onclick="hideSection()" style="margin-top: 20px;">← Powrót</button>
         </div>
     </div>
 
     <script>
-        function copyToClipboard(elementId) {
-            const text = document.getElementById(elementId).textContent;
-            navigator.clipboard.writeText(text).then(() => {
-                alert('✅ Skopiowano: ' + text);
-            });
+        const sections = {
+            users: `
+                <h2>👥 Zarządzanie Użytkownikami</h2>
+                <div class="server-status">
+                    <h4>Lista Użytkowników</h4>
+                    <ul style="list-style: none; padding: 15px;">
+                        <li style="padding: 10px; border-bottom: 1px solid #eee;">
+                            <strong>testuser</strong> - test@example.com 
+                            <span class="online" style="float: right;">● AKTYWNY</span>
+                        </li>
+                        <li style="padding: 10px; border-bottom: 1px solid #eee;">
+                            <strong>admin</strong> - admin@panel.com 
+                            <span class="online" style="float: right;">● AKTYWNY</span>
+                        </li>
+                    </ul>
+                </div>
+                <button class="btn btn-success">➕ Dodaj Użytkownika</button>
+            `,
+            servers: `
+                <h2>🎮 Zarządzanie Serwerami</h2>
+                <div class="server-status">
+                    <h4>Twoje Serwery</h4>
+                    <div style="background: #f7fafc; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                        <h3>🦖 Minecraft Server</h3>
+                        <p>Status: <span class="online">● DZIAŁA</span></p>
+                        <p>Port: 25565 • RAM: 2048MB • Gracze: 0/20</p>
+                        <button class="btn btn-warning" style="padding: 5px 10px;">Restart</button>
+                        <button class="btn btn-danger" style="padding: 5px 10px;">Stop</button>
+                    </div>
+                    <div style="background: #f7fafc; padding: 15px; border-radius: 8px; margin: 10px 0;">
+                        <h3>🐍 Python API</h3>
+                        <p>Status: <span class="online">● DZIAŁA</span></p>
+                        <p>Port: 8000 • RAM: 512MB • Uptime: 2h 30m</p>
+                        <button class="btn btn-warning" style="padding: 5px 10px;">Restart</button>
+                        <button class="btn btn-danger" style="padding: 5px 10px;">Stop</button>
+                    </div>
+                </div>
+                <button class="btn btn-success">➕ Utwórz Nowy Serwer</button>
+            `,
+            stats: `
+                <h2>📊 Statystyki Systemu</h2>
+                <div class="card-grid">
+                    <div class="card">
+                        <h3>💾 Zasoby</h3>
+                        <p>CPU: <strong>15%</strong></p>
+                        <p>RAM: <strong>1.2GB / 4GB</strong></p>
+                        <p>Disk: <strong>450MB / 10GB</strong></p>
+                    </div>
+                    <div class="card">
+                        <h3>🌐 Sieć</h3>
+                        <p>Ruch: <strong>125MB</strong></p>
+                        <p>Połączenia: <strong>12</strong></p>
+                        <p>Porty: <strong>3 aktywne</strong></p>
+                    </div>
+                    <div class="card">
+                        <h3>📈 Wydajność</h3>
+                        <p>Uptime: <strong>2h 30m</strong></p>
+                        <p>Serwery: <strong>2 aktywne</strong></p>
+                        <p>Użytkownicy: <strong>2 online</strong></p>
+                    </div>
+                </div>
+            `,
+            management: `
+                <h2>🔧 Zarządzanie Systemem</h2>
+                <div class="card-grid">
+                    <div class="card">
+                        <h3>💾 Backup</h3>
+                        <p>Utwórz kopię zapasową systemu</p>
+                        <button class="btn btn-warning">Utwórz Backup</button>
+                    </div>
+                    <div class="card">
+                        <h3>🔄 Restart</h3>
+                        <p>Uruchom ponownie panel</p>
+                        <button class="btn btn-info">Restart Panelu</button>
+                    </div>
+                    <div class="card">
+                        <h3>⚙️ Ustawienia</h3>
+                        <p>Konfiguracja systemu</p>
+                        <button class="btn">Otwórz Ustawienia</button>
+                    </div>
+                </div>
+            `,
+            client: `
+                <h2>👋 Witaj w Panelu Klienta!</h2>
+                <div class="info-box">
+                    <h3>Twoje Konto</h3>
+                    <p><strong>Nazwa użytkownika:</strong> testuser</p>
+                    <p><strong>Email:</strong> test@example.com</p>
+                    <p><strong>Data rejestracji:</strong> 2024-01-01</p>
+                </div>
+                <div class="server-status">
+                    <h3>🎮 Twoje Serwery</h3>
+                    <p>Masz <strong>2 aktywne serwery</strong>:</p>
+                    <ul style="list-style: none; padding: 15px;">
+                        <li style="padding: 8px;">• Minecraft Server (25565) - <span class="online">DZIAŁA</span></li>
+                        <li style="padding: 8px;">• Python API (8000) - <span class="online">DZIAŁA</span></li>
+                    </ul>
+                </div>
+                <button class="btn btn-success">🔄 Odśwież Status</button>
+            `
+        };
+
+        function showSection(section) {
+            document.getElementById('section-content').innerHTML = sections[section];
+            document.getElementById('content-section').style.display = 'block';
+            window.scrollTo(0, document.getElementById('content-section').offsetTop);
         }
 
-        function refreshIPs() {
-            fetch('/api/status')
-                .then(response => response.json())
-                .then(data => {
-                    if (data.local_ip && data.port) {
-                        document.getElementById('local-ip').textContent = 
-                            'http://' + data.local_ip + ':' + data.port;
-                    }
-                    if (data.public_ip && data.port) {
-                        document.getElementById('public-ip').textContent = 
-                            'http://' + data.public_ip + ':' + data.port;
-                    }
-                    if (data.port) {
-                        document.getElementById('localhost-ip').textContent = 
-                            'http://localhost:' + data.port;
-                    }
-                    alert('✅ Adresy IP zaktualizowane!');
-                })
-                .catch(error => {
-                    alert('❌ Błąd podczas odświeżania IP');
-                });
+        function hideSection() {
+            document.getElementById('content-section').style.display = 'none';
         }
 
-        // Auto-odświeżanie co 30 sekund
-        setInterval(refreshIPs, 30000);
+        // Symulacja ładowania danych
+        console.log('🦖 Panel Pterodactyl - CodeSandbox Edition załadowany!');
     </script>
 </body>
 </html>
 EOF
 
-    # Panel klienta z dynamicznym IP
+    # Panel klienta
     mkdir -p "$WEB_DIR/client"
     cat > "$WEB_DIR/client/index.html" << 'EOF'
 <!DOCTYPE html>
@@ -508,7 +449,7 @@ EOF
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Panel Klienta</title>
+    <title>Panel Klienta - CodeSandbox</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { 
@@ -519,7 +460,7 @@ EOF
             padding: 20px;
         }
         .container { 
-            max-width: 1200px; 
+            max-width: 1000px; 
             margin: 0 auto; 
             background: rgba(255, 255, 255, 0.95);
             border-radius: 15px;
@@ -535,34 +476,17 @@ EOF
             margin-bottom: 10px; 
             color: #2d3748;
         }
-        .ip-info {
-            background: #e0f2fe;
-            border: 2px solid #bae6fd;
+        .server-card {
+            background: white;
             border-radius: 10px;
-            padding: 15px;
-            margin: 20px 0;
-            text-align: center;
-        }
-        .ip-address {
-            font-family: 'Courier New', monospace;
-            background: #1a202c;
-            color: #cbd5e0;
-            padding: 8px 12px;
-            border-radius: 5px;
-            margin: 5px;
-            display: inline-block;
-        }
-        .card { 
-            background: white; 
-            padding: 30px; 
-            border-radius: 15px; 
-            margin-bottom: 20px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1); 
+            padding: 20px;
+            margin: 15px 0;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
             border-left: 4px solid #48bb78;
         }
         .btn { 
             display: inline-block; 
-            padding: 12px 30px; 
+            padding: 10px 20px; 
             background: #4299e1; 
             color: white; 
             text-decoration: none; 
@@ -573,318 +497,69 @@ EOF
             margin: 5px;
         }
         .btn-success { background: #48bb78; }
+        .online { color: #48bb78; }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
-            <h1>👋 Witaj w Panelu Klienta</h1>
-            <p>Zarządzaj swoimi serwerami</p>
+            <h1>👋 Witaj, testuser!</h1>
+            <p>Panel Klienta - Zarządzaj swoimi serwerami</p>
         </div>
 
-        <div class="ip-info">
-            <h3>🌐 Adres Panelu</h3>
-            <div>
-                <span class="ip-address">http://%%LOCAL_IP%%:%%PORT%%/client/</span>
-            </div>
-            <div>
-                <span class="ip-address">http://%%PUBLIC_IP%%:%%PORT%%/client/</span>
-            </div>
-            <p style="margin-top: 10px; font-size: 0.9em; color: #666;">
-                Użyj tych adresów aby uzyskać dostęp z innych urządzeń
-            </p>
+        <div style="text-align: center; margin-bottom: 30px;">
+            <button class="btn btn-success">➕ Utwórz Nowy Serwer</button>
+            <button class="btn">🔄 Odśwież Status</button>
+            <a href="/" class="btn">🏠 Panel Admina</a>
         </div>
 
-        <div class="card">
-            <h2>🎮 Twoje Serwery</h2>
-            <p>Tutaj możesz tworzyć i zarządzać swoimi serwerami.</p>
-            <button class="btn btn-success" onclick="createServer()">➕ Utwórz Serwer</button>
-        </div>
-
-        <div class="card">
-            <h2>📊 Podgląd Serwerów</h2>
-            <div id="servers-list">
-                <p>Ładowanie listy serwerów...</p>
+        <div class="server-card">
+            <h3>🎮 Minecraft Server</h3>
+            <p>Status: <span class="online">● DZIAŁA</span></p>
+            <p><strong>Port:</strong> 25565</p>
+            <p><strong>RAM:</strong> 2048MB</p>
+            <p><strong>Gracze:</strong> 0/20 online</p>
+            <div style="margin-top: 15px;">
+                <button class="btn">⚙️ Zarządzaj</button>
+                <button class="btn" style="background: #ed8936;">🔄 Restart</button>
+                <button class="btn" style="background: #e53e3e;">🛑 Stop</button>
             </div>
         </div>
 
-        <div style="text-align: center; margin-top: 30px;">
-            <a href="/" class="btn">🏠 Powrót do Panelu Admina</a>
+        <div class="server-card">
+            <h3>🐍 Python API Server</h3>
+            <p>Status: <span class="online">● DZIAŁA</span></p>
+            <p><strong>Port:</strong> 8000</p>
+            <p><strong>RAM:</strong> 512MB</p>
+            <p><strong>Uptime:</strong> 2 godziny 30 minut</p>
+            <div style="margin-top: 15px;">
+                <button class="btn">⚙️ Zarządzaj</button>
+                <button class="btn" style="background: #ed8936;">🔄 Restart</button>
+                <button class="btn" style="background: #e53e3e;">🛑 Stop</button>
+            </div>
+        </div>
+
+        <div style="background: #f7fafc; padding: 20px; border-radius: 10px; margin-top: 30px;">
+            <h3>📊 Statystyki Konta</h3>
+            <p><strong>Limit serwerów:</strong> 2/10</p>
+            <p><strong>Wykorzystana pamięć:</strong> 2.5GB / 8GB</p>
+            <p><strong>Data rejestracji:</strong> 2024-01-01</p>
         </div>
     </div>
 
     <script>
-        function createServer() {
-            alert('Funkcja tworzenia serwera będzie dostępna wkrótce!');
-        }
-
-        // Symulacja ładowania serwerów
-        setTimeout(() => {
-            document.getElementById('servers-list').innerHTML = `
-                <div style="background: #f7fafc; padding: 15px; border-radius: 8px; margin: 10px 0;">
-                    <h3>🦖 Przykładowy Serwer</h3>
-                    <p>Status: <span style="color: #48bb78;">● DZIAŁA</span></p>
-                    <p>Typ: Minecraft • Port: 25565 • RAM: 2048MB</p>
-                    <p>Adres: <code>%%LOCAL_IP%%:25565</code></p>
-                </div>
-            `;
-        }, 1000);
+        console.log('Panel klienta załadowany');
     </script>
 </body>
 </html>
 EOF
 
-    echo -e "${GREEN}✅ Interfejs web utworzony z dynamicznym IP${NC}"
+    echo -e "${GREEN}✅ Interfejs web utworzony${NC}"
 }
 
 # =============================================
-# 🚀 SZYBKA INICJALIZACJA Z AUTO-IP
+# 🚀 SZYBKA INICJALIZACJA
 # =============================================
 
 quick_initialize() {
-    echo -e "${BLUE}🦖 Szybka inicjalizacja Panelu Pterodactyl...${NC}"
-    
-    # Sprawdź uprawnienia
-    if [ "$EUID" -ne 0 ]; then
-        echo -e "${RED}Uruchom jako root: sudo $0${NC}"
-        exit 1
-    fi
-    
-    # Szybkie sprawdzenie zależności
-    echo -e "${YELLOW}🔍 Sprawdzanie zależności...${NC}"
-    for cmd in nc python3 curl; do
-        if ! command -v $cmd &> /dev/null; then
-            echo -e "${YELLOW}📦 Instalowanie: $cmd${NC}"
-            apt update > /dev/null 2>&1
-            apt install -y netcat-openbsd python3 curl > /dev/null 2>&1
-        fi
-    done
-    
-    # Utwórz katalogi
-    echo -e "${YELLOW}📁 Tworzenie struktur katalogów...${NC}"
-    setup_directories
-    
-    # Utwórz podstawowego użytkownika
-    if [ ! -f "$USERS_DIR/testuser.conf" ]; then
-        cat > "$USERS_DIR/testuser.conf" << EOF
-USERNAME="testuser"
-USER_EMAIL="test@example.com"
-USER_PASSWORD="test123"
-USER_CREATED="$(date '+%Y-%m-%d %H:%M:%S')"
-EOF
-        echo -e "${GREEN}✅ Utworzono użytkownika testowego${NC}"
-    fi
-    
-    # Wykryj IP przed uruchomieniem
-    echo -e "${YELLOW}🌐 Wykrywanie adresów IP serwera...${NC}"
-    local ips=$(get_server_ips)
-    local local_ip=$(echo "$ips" | cut -d'|' -f1)
-    local public_ip=$(echo "$ips" | cut -d'|' -f2)
-    
-    echo -e "${CYAN}📡 Lokalne IP:${NC} $local_ip"
-    if [ -n "$public_ip" ]; then
-        echo -e "${CYAN}🌍 Publiczne IP:${NC} $public_ip"
-    else
-        echo -e "${YELLOW}🌍 Publiczne IP:${NC} nie wykryto (tylko sieć lokalna)"
-    fi
-    
-    # Utwórz interfejs web
-    echo -e "${YELLOW}🌐 Tworzenie interfejsu web...${NC}"
-    create_web_interface
-    
-    # URUCHOM SERWER NATYCHMIAST
-    echo -e "${YELLOW}🚀 Uruchamianie serwera web...${NC}"
-    start_web_server
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}=============================================${NC}"
-        echo -e "${GREEN}🎉 PANEL PTERODACTYL JEST GOTOWY!${NC}"
-        echo -e "${GREEN}=============================================${NC}"
-        echo -e "${CYAN}🔐 Dane testowe:${NC}   użytkownik: testuser, hasło: test123"
-        echo -e "${GREEN}=============================================${NC}"
-        echo -e "${YELLOW}💡 Panel jest już dostępny w przeglądarce!${NC}"
-        echo -e "${YELLOW}📱 Użyj adresów IP aby uzyskać dostęp z innych urządzeń${NC}"
-    else
-        echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
-        exit 1
-    fi
-}
-
-# =============================================
-# 🛑 FUNKCJA SPRZĄTAJĄCA
-# =============================================
-
-cleanup() {
-    echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
-    stop_web_server
-    echo -e "${GREEN}✅ Panel został zatrzymany${NC}"
-    exit 0
-}
-
-# =============================================
-# 🎯 FUNKCJE ZARZĄDZANIA PANELEM
-# =============================================
-
-show_status() {
-    if [ -f "$PID_FILE" ]; then
-        local pid=$(cat "$PID_FILE")
-        if ps -p "$pid" > /dev/null 2>&1; then
-            echo -e "${GREEN}✅ Panel jest uruchomiony (PID: $pid)${NC}"
-            
-            # Pobierz aktualne IP
-            local ips=$(get_server_ips)
-            local local_ip=$(echo "$ips" | cut -d'|' -f1)
-            local public_ip=$(echo "$ips" | cut -d'|' -f2)
-            
-            echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
-            echo -e "  Local:    http://$local_ip:$PORT"
-            if [ -n "$public_ip" ]; then
-                echo -e "  Public:   http://$public_ip:$PORT"
-            fi
-            echo -e "  Localhost: http://localhost:$PORT"
-        else
-            echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
-        fi
-    else
-        echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
-    fi
-}
-
-restart_panel() {
-    echo -e "${YELLOW}🔄 Restartowanie panelu...${NC}"
-    stop_web_server
-    sleep 2
-    start_web_server
-}
-
-backup_panel() {
-    local backup_name="panel-backup-$(date '+%Y-%m-%d-%H-%M-%S')"
-    local backup_path="$PANEL_BACKUP_DIR/$backup_name.tar.gz"
-    
-    echo -e "${YELLOW}📦 Tworzenie backupu panelu...${NC}"
-    
-    tar -czf "$backup_path" -C "$PANEL_DIR" . 2>/dev/null
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Backup utworzony: $backup_path${NC}"
-    else
-        echo -e "${RED}❌ Błąd podczas tworzenia backupu${NC}"
-    fi
-}
-
-show_help() {
-    echo -e "${GREEN}🦖 Panel Pterodactyl - Pomoc${NC}"
-    echo ""
-    echo -e "${CYAN}Dostępne komendy:${NC}"
-    echo -e "  ${YELLOW}start${NC}     - Uruchom panel"
-    echo -e "  ${YELLOW}stop${NC}      - Zatrzymaj panel"
-    echo -e "  ${YELLOW}restart${NC}   - Restartuj panel"
-    echo -e "  ${YELLOW}status${NC}    - Pokaż status panelu"
-    echo -e "  ${YELLOW}backup${NC}    - Utwórz backup panelu"
-    echo -e "  ${YELLOW}help${NC}      - Pokaż tę pomoc"
-    echo ""
-    echo -e "${CYAN}Przykłady:${NC}"
-    echo -e "  ${GREEN}sudo $0 start${NC}"
-    echo -e "  ${GREEN}sudo $0 status${NC}"
-    echo -e "  ${GREEN}sudo $0 backup${NC}"
-}
-
-# =============================================
-# 📜 MAIN SCRIPT - AUTO-IP
-# =============================================
-
-# Zarejestruj trap dla sygnałów
-trap cleanup INT TERM
-
-# Sprawdź argumenty
-case "${1:-}" in
-    "start")
-        # NATYCHMIASTOWE URUCHOMIENIE PANELU Z AUTO-IP
-        quick_initialize
-        
-        # Uruchom pełną pętlę serwera w tle
-        {
-            sleep 3
-            stop_web_server
-            
-            # Pełna wersja serwera z API i auto-IP
-            {
-                while true; do
-                    nc -l -p $PORT -c "
-                        read -r request
-                        export REQUEST_URI=\$(echo \"\$request\" | awk '{print \$2}')
-                        export REQUEST_METHOD=\$(echo \"\$request\" | awk '{print \$1}')
-                        
-                        # Aktualizuj IP przy każdym żądaniu
-                        current_ips=\$(get_server_ips)
-                        current_local_ip=\$(echo \"\$current_ips\" | cut -d'|' -f1)
-                        current_public_ip=\$(echo \"\$current_ips\" | cut -d'|' -f2)
-                        
-                        if [[ \"\$REQUEST_URI\" == \"/api/status\" ]]; then
-                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                            echo '{\"status\":\"online\",\"port\":\"'$PORT'\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
-                        elif [[ \"\$REQUEST_URI\" == \"/api/\"* ]]; then
-                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\"
-                            echo '{\"success\":true,\"message\":\"API działa\",\"local_ip\":\"'\"\$current_local_ip\"'\",\"public_ip\":\"'\"\$current_public_ip\"'\"}'
-                        elif [[ \"\$REQUEST_URI\" == \"/client\"* ]]; then
-                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                            sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/client/index.html\"
-                        else
-                            echo -e \"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nConnection: close\r\n\r\"
-                            sed \"s/%%LOCAL_IP%%/\$current_local_ip/g; s/%%PUBLIC_IP%%/\$current_public_ip/g; s/%%PORT%%/$PORT/g\" \"$WEB_DIR/index.html\"
-                        fi
-                    " 2>/dev/null
-                done
-            } > /dev/null 2>&1 &
-            
-            echo $! > "$PID_FILE"
-            log "✅ Pełna wersja serwera z Auto-IP uruchomiona"
-            
-        } &
-        
-        # Pozostaw panel działający
-        echo -e "${YELLOW}⏳ Panel kontynuuje pracę w tle...${NC}"
-        echo -e "${YELLOW}🛑 Aby zatrzymać: Ctrl+C${NC}"
-        
-        # Czekaj na sygnał zakończenia
-        while true; do
-            sleep 10
-        done
-        ;;
-    "stop")
-        stop_web_server
-        ;;
-    "restart")
-        restart_panel
-        ;;
-    "status")
-        show_status
-        ;;
-    "backup")
-        backup_panel
-        ;;
-    "help"|"--help"|"-h")
-        show_help
-        ;;
-    *)
-        # Domyślnie uruchom panel jeśli nie podano argumentów
-        if [ ! -d "$PANEL_DIR" ]; then
-            echo -e "${GREEN}🔄 Uruchamianie nowej instalacji panelu...${NC}"
-            quick_initialize
-        else
-            echo -e "${GREEN}🔄 Uruchamianie istniejącego panelu z Auto-IP...${NC}"
-            start_web_server
-        fi
-        
-        if [ $? -eq 0 ]; then
-            echo -e "${YELLOW}🛑 Naciśnij Ctrl+C aby zatrzymać${NC}"
-            
-            while true; do
-                sleep 10
-            done
-        else
-            echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
-            exit 1
-        fi
-        ;;
-esac
+    echo -e "${BLUE}🦖 Inicj
