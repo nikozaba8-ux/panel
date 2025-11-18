@@ -562,4 +562,142 @@ EOF
 # =============================================
 
 quick_initialize() {
-    echo -e "${BLUE}🦖 Inicj
+    echo -e "${BLUE}🦖 Inicjalizacja Panelu Pterodactyl (CodeSandbox)...${NC}"
+    
+    # Utwórz katalogi
+    echo -e "${YELLOW}📁 Tworzenie struktur katalogów...${NC}"
+    setup_directories
+    
+    # Utwórz podstawowego użytkownika
+    if [ ! -f "$USERS_DIR/testuser.conf" ]; then
+        cat > "$USERS_DIR/testuser.conf" << EOF
+USERNAME="testuser"
+USER_EMAIL="test@example.com"
+USER_PASSWORD="test123"
+USER_CREATED="$(date '+%Y-%m-%d %H:%M:%S')"
+EOF
+        echo -e "${GREEN}✅ Utworzono użytkownika testowego${NC}"
+    fi
+    
+    # Utwórz przykładowe serwery
+    cat > "$SERVERS_DIR/minecraft.json" << EOF
+{
+    "name": "Minecraft Server",
+    "type": "minecraft",
+    "port": 25565,
+    "memory": 2048,
+    "status": "running",
+    "owner": "testuser"
+}
+EOF
+
+    cat > "$SERVERS_DIR/python.json" << EOF
+{
+    "name": "Python API", 
+    "type": "python",
+    "port": 8000,
+    "memory": 512,
+    "status": "running",
+    "owner": "testuser"
+}
+EOF
+
+    # Utwórz interfejs web
+    echo -e "${YELLOW}🌐 Tworzenie interfejsu web...${NC}"
+    create_web_interface
+    
+    # URUCHOM SERWER
+    echo -e "${YELLOW}🚀 Uruchamianie serwera web...${NC}"
+    start_web_server
+    
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}=============================================${NC}"
+        echo -e "${GREEN}🎉 PANEL PTERODACTYL JEST GOTOWY!${NC}"
+        echo -e "${GREEN}=============================================${NC}"
+        echo -e "${CYAN}🔐 Dane testowe:${NC}"
+        echo -e "   Użytkownik: ${GREEN}testuser${NC}"
+        echo -e "   Hasło: ${GREEN}test123${NC}"
+        echo -e "${GREEN}=============================================${NC}"
+        echo -e "${YELLOW}💡 Panel jest dostępny pod:${NC}"
+        echo -e "   ${CYAN}http://localhost:$PORT${NC}"
+        echo -e "${YELLOW}📱 W CodeSandbox sprawdź zakładkę 'Ports'${NC}"
+    else
+        echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
+        return 1
+    fi
+}
+
+# =============================================
+# 🛑 FUNKCJA SPRZĄTAJĄCA
+# =============================================
+
+cleanup() {
+    echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
+    stop_web_server
+    echo -e "${GREEN}✅ Panel został zatrzymany${NC}"
+    exit 0
+}
+
+# =============================================
+# 🎯 FUNKCJE ZARZĄDZANIA
+# =============================================
+
+show_status() {
+    if [ -f "$PID_FILE" ]; then
+        local pid=$(cat "$PID_FILE")
+        if ps -p "$pid" > /dev/null 2>&1; then
+            echo -e "${GREEN}✅ Panel jest uruchomiony (PID: $pid)${NC}"
+            echo -e "${CYAN}🌐 Adres: http://localhost:$PORT${NC}"
+        else
+            echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
+        fi
+    else
+        echo -e "${RED}❌ Panel nie jest uruchomiony${NC}"
+    fi
+}
+
+show_help() {
+    echo -e "${GREEN}🦖 Panel Pterodactyl - CodeSandbox Edition${NC}"
+    echo ""
+    echo -e "${CYAN}Dostępne komendy:${NC}"
+    echo -e "  ${YELLOW}start${NC}     - Uruchom panel"
+    echo -e "  ${YELLOW}stop${NC}      - Zatrzymaj panel" 
+    echo -e "  ${YELLOW}status${NC}    - Pokaż status panelu"
+    echo -e "  ${YELLOW}help${NC}      - Pokaż tę pomoc"
+    echo ""
+    echo -e "${CYAN}Przykład:${NC}"
+    echo -e "  ${GREEN}bash panel.sh start${NC}"
+}
+
+# =============================================
+# 📜 MAIN SCRIPT
+# =============================================
+
+# Zarejestruj trap dla sygnałów
+trap cleanup INT TERM
+
+# Sprawdź argumenty
+case "${1:-}" in
+    "start")
+        quick_initialize
+        
+        # Czekaj na sygnał zakończenia
+        echo -e "${YELLOW}⏳ Panel działa... Naciśnij Ctrl+C aby zatrzymać${NC}"
+        while true; do
+            sleep 10
+        done
+        ;;
+    "stop")
+        stop_web_server
+        ;;
+    "status")
+        show_status
+        ;;
+    "help"|"--help"|"-h")
+        show_help
+        ;;
+    *)
+        # Domyślnie pokaż pomoc
+        show_help
+        ;;
+esac
