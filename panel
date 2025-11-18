@@ -656,48 +656,97 @@ show_status() {
     fi
 }
 
-show_help() {
-    echo -e "${GREEN}🦖 Panel Pterodactyl - CodeSandbox Edition${NC}"
-    echo ""
-    echo -e "${CYAN}Dostępne komendy:${NC}"
-    echo -e "  ${YELLOW}start${NC}     - Uruchom panel"
-    echo -e "  ${YELLOW}stop${NC}      - Zatrzymaj panel" 
-    echo -e "  ${YELLOW}status${NC}    - Pokaż status panelu"
-    echo -e "  ${YELLOW}help${NC}      - Pokaż tę pomoc"
-    echo ""
-    echo -e "${CYAN}Przykład:${NC}"
-    echo -e "  ${GREEN}bash panel.sh start${NC}"
+restart_panel() {
+    echo -e "${YELLOW}🔄 Restartowanie panelu...${NC}"
+    stop_web_server
+    sleep 2
+    start_web_server
+}
+
+show_menu() {
+    echo -e "${GREEN}"
+    echo -e "╔══════════════════════════════════════╗"
+    echo -e "║         🦖 PANEL PTERODACTYL         ║"
+    echo -e "║           CodeSandbox Edition        ║"
+    echo -e "╠══════════════════════════════════════╣"
+    echo -e "║                                      ║"
+    echo -e "║  ${YELLOW}1${GREEN}️⃣  - Uruchom panel                ║"
+    echo -e "║  ${YELLOW}2${GREEN}️⃣  - Zatrzymaj panel              ║"
+    echo -e "║  ${YELLOW}3${GREEN}️⃣  - Restartuj panel              ║"
+    echo -e "║  ${YELLOW}4${GREEN}️⃣  - Status panelu                ║"
+    echo -e "║  ${YELLOW}5${GREEN}️⃣  - Wyjście                      ║"
+    echo -e "║                                      ║"
+    echo -e "╠══════════════════════════════════════╣"
+    echo -e "║        Wybierz opcję (1-5):          ║"
+    echo -e "╚══════════════════════════════════════╝"
+    echo -e "${NC}"
 }
 
 # =============================================
-# 📜 MAIN SCRIPT
+# 📜 MAIN SCRIPT - MENU NUMERYCZNE
 # =============================================
 
 # Zarejestruj trap dla sygnałów
 trap cleanup INT TERM
 
-# Sprawdź argumenty
-case "${1:-}" in
-    "start")
-        quick_initialize
-        
-        # Czekaj na sygnał zakończenia
-        echo -e "${YELLOW}⏳ Panel działa... Naciśnij Ctrl+C aby zatrzymać${NC}"
-        while true; do
-            sleep 10
-        done
-        ;;
-    "stop")
-        stop_web_server
-        ;;
-    "status")
-        show_status
-        ;;
-    "help"|"--help"|"-h")
-        show_help
-        ;;
-    *)
-        # Domyślnie pokaż pomoc
-        show_help
-        ;;
-esac
+clear
+echo -e "${BLUE}🦖 Witaj w Panelu Pterodactyl!${NC}"
+echo -e "${YELLOW}CodeSandbox Edition${NC}"
+echo ""
+
+while true; do
+    show_menu
+    read -p "Twój wybór: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${BLUE}🔄 Wybrano: Uruchom panel${NC}"
+            quick_initialize
+            if [ $? -eq 0 ]; then
+                echo -e "${YELLOW}⏳ Panel działa... Naciśnij Enter aby wrócić do menu${NC}"
+                read
+            else
+                echo -e "${RED}❌ Błąd podczas uruchamiania panelu${NC}"
+                read -p "Naciśnij Enter aby kontynuować..."
+            fi
+            ;;
+        2)
+            echo ""
+            echo -e "${BLUE}🛑 Wybrano: Zatrzymaj panel${NC}"
+            stop_web_server
+            echo -e "${GREEN}✅ Panel został zatrzymany${NC}"
+            read -p "Naciśnij Enter aby kontynuować..."
+            ;;
+        3)
+            echo ""
+            echo -e "${BLUE}🔄 Wybrano: Restartuj panel${NC}"
+            restart_panel
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✅ Panel został zrestartowany${NC}"
+            else
+                echo -e "${RED}❌ Błąd podczas restartowania panelu${NC}"
+            fi
+            read -p "Naciśnij Enter aby kontynuować..."
+            ;;
+        4)
+            echo ""
+            echo -e "${BLUE}📊 Wybrano: Status panelu${NC}"
+            show_status
+            read -p "Naciśnij Enter aby kontynuować..."
+            ;;
+        5)
+            echo ""
+            echo -e "${GREEN}👋 Do zobaczenia!${NC}"
+            stop_web_server
+            exit 0
+            ;;
+        *)
+            echo ""
+            echo -e "${RED}❌ Nieprawidłowy wybór! Wybierz 1-5${NC}"
+            read -p "Naciśnij Enter aby spróbować ponownie..."
+            ;;
+    esac
+    
+    clear
+done
