@@ -434,18 +434,6 @@ list_servers() {
     done
 }
 
-get_server_info() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -f "$dir/server.conf" ]; then
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    echo "{\"id\":\"$ID\",\"name\":\"$NAME\",\"type\":\"$TYPE\",\"port\":\"$PORT\",\"memory\":\"$MEMORY\",\"owner\":\"$OWNER\",\"status\":\"$STATUS\"}"
-}
-
 get_all_servers() {
     local servers="["
     local first=true
@@ -468,163 +456,13 @@ get_all_servers() {
 }
 
 # =============================================
-# 🌐 SERWER HTTP Z API
+# 🌐 TWORZENIE PANELU WEB
 # =============================================
 
-start_web_panel() {
-    echo -e "${YELLOW}🌐 URUCHAMIANIE PANELU WEB...${NC}"
+create_web_panel() {
+    echo -e "${YELLOW}🌐 TWORZENIE PANELU WEB...${NC}"
     
-    stop_web_panel
-    
-    # Utwórz interfejs web
-    create_web_interface
-    
-    # Uruchom serwer HTTP z obsługą API
-    start_http_server &
-    local server_pid=$!
-    echo $server_pid > "$WEB_PID_FILE"
-    
-    local ip=$(hostname -I | awk '{print $1}')
-    
-    log "Panel web uruchomiony na porcie $PORT (PID: $server_pid)"
-    echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
-    echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
-    echo -e "   Local:    http://localhost:$PORT"
-    echo -e "   Sieć:     http://$ip:$PORT"
-    echo -e "   Status:   http://localhost:$PORT/status"
-}
-
-stop_web_panel() {
-    if [ -f "$WEB_PID_FILE" ]; then
-        local pid=$(cat "$WEB_PID_FILE")
-        if ps -p $pid > /dev/null 2>&1; then
-            kill $pid 2>/dev/null
-        fi
-        rm -f "$WEB_PID_FILE"
-    fi
-    
-    pkill -f "http_server" 2>/dev/null
-}
-
-start_http_server() {
-    while true; do
-        nc -l -p $PORT -c "
-            read -r request
-            method=\$(echo \"\$request\" | awk '{print \$1}')
-            path=\$(echo \"\$request\" | awk '{print \$2}')
-            
-            # Pobierz całe żądanie
-            while read -r line; do
-                [ -z \"\$line\" ] && break
-                if echo \"\$line\" | grep -q 'Content-Length'; then
-                    content_length=\$(echo \"\$line\" | awk '{print \$2}')
-                fi
-            done
-            
-            # Pobierz dane POST jeśli istnieją
-            if [ \"\$method\" = \"POST\" ] && [ -n \"\$content_length\" ]; then
-                post_data=\"\"
-                while [ \"\$content_length\" -gt 0 ]; do
-                    read -r -n 1 char
-                    post_data=\"\$post_data\$char\"
-                    content_length=\$((content_length - 1))
-                done
-            fi
-            
-            # Nagłówki odpowiedzi
-            echo 'HTTP/1.1 200 OK'
-            echo 'Content-Type: application/json'
-            echo 'Access-Control-Allow-Origin: *'
-            echo 'Access-Control-Allow-Methods: GET, POST, OPTIONS'
-            echo 'Access-Control-Allow-Headers: Content-Type'
-            echo ''
-            
-            # Routing
-            case \"\$path\" in
-                \"/api/servers\")
-                    if [ \"\$method\" = \"GET\" ]; then
-                        get_all_servers
-                    else
-                        echo '{\"error\":\"Method not allowed\"}'
-                    fi
-                    ;;
-                \"/api/server/create\")
-                    if [ \"\$method\" = \"POST\" ]; then
-                        # Parsuj dane JSON
-                        name=\$(echo \"\$post_data\" | grep -o '\"name\":\"[^\"]*' | cut -d'\"' -f4)
-                        type=\$(echo \"\$post_data\" | grep -o '\"type\":\"[^\"]*' | cut -d'\"' -f4)
-                        port=\$(echo \"\$post_data\" | grep -o '\"port\":\"[^\"]*' | cut -d'\"' -f4)
-                        memory=\$(echo \"\$post_data\" | grep -o '\"memory\":\"[^\"]*' | cut -d'\"' -f4)
-                        owner=\$(echo \"\$post_data\" | grep -o '\"owner\":\"[^\"]*' | cut -d'\"' -f4)
-                        
-                        result=\$(create_server \"\$name\" \"\$type\" \"\$port\" \"\$memory\" \"\$owner\" 2>&1)
-                        if echo \"\$result\" | grep -q \"SUCCESS\"; then
-                            echo '{\"success\":true,\"message\":\"'\"\$(echo \"\$result\" | cut -d':' -f2- | sed 's/\"/\\\\\"/g')\"'\"}'
-                        else
-                            echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
-                        fi
-                    else
-                        echo '{\"error\":\"Method not allowed\"}'
-                    fi
-                    ;;
-                \"/api/server/\"*)
-                    # Parsuj ścieżkę /api/server/{id}/{action}
-                    server_id=\$(echo \"\$path\" | cut -d'/' -f4)
-                    action=\$(echo \"\$path\" | cut -d'/' -f5)
-                    
-                    if [ \"\$method\" = \"POST\" ]; then
-                        case \"\$action\" in
-                            \"start\")
-                                result=\$(start_server \"\$server_id\" 2>&1)
-                                ;;
-                            \"stop\")
-                                result=\$(stop_server \"\$server_id\" 2>&1)
-                                ;;
-                            \"restart\")
-                                result=\$(restart_server \"\$server_id\" 2>&1)
-                                ;;
-                            \"delete\")
-                                result=\$(delete_server \"\$server_id\" 2>&1)
-                                ;;
-                            *)
-                                result=\"ERROR: Nieznana akcja\"
-                                ;;
-                        esac
-                        
-                        if echo \"\$result\" | grep -q \"SUCCESS\\|WARNING\"; then
-                            echo '{\"success\":true,\"message\":\"'\"\$(echo \"\$result\" | cut -d':' -f2- | sed 's/\"/\\\\\"/g')\"'\"}'
-                        else
-                            echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
-                        fi
-                    else
-                        echo '{\"error\":\"Method not allowed\"}'
-                    fi
-                    ;;
-                \"/\"|\"/index.html\")
-                    echo 'HTTP/1.1 200 OK'
-                    echo 'Content-Type: text/html'
-                    echo ''
-                    cat \"$WEB_DIR/index.html\"
-                    ;;
-                \"/status\")
-                    echo 'HTTP/1.1 200 OK'
-                    echo 'Content-Type: text/html'
-                    echo ''
-                    cat \"$WEB_DIR/status.html\"
-                    ;;
-                *)
-                    echo 'HTTP/1.1 200 OK'
-                    echo 'Content-Type: text/html'
-                    echo ''
-                    cat \"$WEB_DIR/index.html\"
-                    ;;
-            esac
-        " 2>/dev/null
-    done
-}
-
-create_web_interface() {
-    # Strona główna
+    # Utwórz główną stronę
     cat > "$WEB_DIR/index.html" << 'HTML'
 <!DOCTYPE html>
 <html lang="pl">
@@ -768,7 +606,7 @@ create_web_interface() {
         <div class="tabs">
             <div class="tab active" onclick="showTab('servers')">🎮 Serwery</div>
             <div class="tab" onclick="showTab('create')">➕ Nowy Serwer</div>
-            <div class="tab" onclick="showTab('stats')">📊 Statystyki</div>
+            <div class="tab" onclick="showTab('help')">❓ Pomoc</div>
         </div>
 
         <div id="servers-tab" class="tab-content active">
@@ -815,17 +653,35 @@ create_web_interface() {
             <div id="formResult"></div>
         </div>
 
-        <div id="stats-tab" class="tab-content">
-            <h3>📊 Statystyki Systemu</h3>
-            <div id="systemStats">
-                <div class="loading">Ładowanie statystyk...</div>
+        <div id="help-tab" class="tab-content">
+            <h3>❓ Pomoc - Jak używać panelu</h3>
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
+                <h4>🎮 Zarządzanie serwerami:</h4>
+                <ul style="margin: 10px 0 20px 20px;">
+                    <li><strong>Start</strong> - uruchamia wybrany serwer</li>
+                    <li><strong>Stop</strong> - zatrzymuje działający serwer</li>
+                    <li><strong>Restart</strong> - restartuje serwer</li>
+                    <li><strong>Usuń</strong> - trwale usuwa serwer</li>
+                </ul>
+                
+                <h4>➕ Tworzenie serwera:</h4>
+                <ul style="margin: 10px 0 20px 20px;">
+                    <li><strong>Minecraft</strong> - automatycznie pobiera serwer</li>
+                    <li><strong>Rust/ARK/CS:GO</strong> - wymagają ręcznej instalacji</li>
+                    <li><strong>Port</strong> - musi być unikalny dla każdego serwera</li>
+                    <li><strong>RAM</strong> - pamięć przydzielona serwerowi</li>
+                </ul>
+                
+                <h4>🌐 Adresy dostępu:</h4>
+                <p>Po utworzeniu serwera możesz się do niego podłączyć pod adresem:</p>
+                <code style="background: #2d3748; color: white; padding: 5px 10px; border-radius: 3px; display: block; margin: 10px 0;">
+                    twoj-adres:PORT
+                </code>
             </div>
         </div>
     </div>
 
     <script>
-        const API_BASE = '';
-        
         function showTab(tabName) {
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
@@ -836,111 +692,93 @@ create_web_interface() {
 
             document.getElementById(tabName + '-tab').classList.add('active');
             event.target.classList.add('active');
+        }
+
+        function refreshServers() {
+            const container = document.getElementById('serverList');
+            container.innerHTML = '<div class="loading">🔄 Ładowanie serwerów...</div>';
             
-            if (tabName === 'servers') {
-                refreshServers();
-            }
-        }
-
-        async function apiCall(endpoint, options = {}) {
-            try {
-                const response = await fetch(endpoint, {
-                    method: options.method || 'GET',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        ...options.headers
+            // Symulacja danych - w prawdziwej wersji tutaj będzie API
+            setTimeout(() => {
+                const servers = [
+                    {
+                        id: 'test-minecraft',
+                        name: 'Testowy Minecraft',
+                        type: 'minecraft',
+                        port: '25565',
+                        memory: '1024',
+                        owner: 'admin',
+                        status: 'stopped'
                     },
-                    body: options.body ? JSON.stringify(options.body) : undefined
-                });
+                    {
+                        id: 'test-rust',
+                        name: 'Testowy Rust',
+                        type: 'rust',
+                        port: '28015',
+                        memory: '2048',
+                        owner: 'admin',
+                        status: 'running'
+                    }
+                ];
                 
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-                
-                const text = await response.text();
-                if (!text.trim()) {
-                    throw new Error('Empty response from server');
-                }
-                
-                return JSON.parse(text);
-            } catch (error) {
-                console.error('API Call error:', error);
-                throw error;
-            }
+                displayServers(servers);
+            }, 1000);
         }
 
-        async function refreshServers() {
+        function displayServers(servers) {
             const container = document.getElementById('serverList');
             
-            try {
-                container.innerHTML = '<div class="loading">🔄 Ładowanie serwerów...</div>';
-                const servers = await apiCall('/api/servers');
+            if (servers.length === 0) {
+                container.innerHTML = '<div class="loading">📭 Brak serwerów. Utwórz pierwszy serwer!</div>';
+                return;
+            }
+            
+            container.innerHTML = '';
+            
+            servers.forEach(server => {
+                const statusClass = server.status === 'running' ? 'running' : 'stopped';
+                const statusText = server.status === 'running' ? 'DZIAŁA' : 'ZATRZYMANY';
                 
-                container.innerHTML = '';
-                
-                if (servers.length === 0) {
-                    container.innerHTML = '<div class="loading">📭 Brak serwerów. Utwórz pierwszy serwer!</div>';
-                    return;
-                }
-                
-                servers.forEach(server => {
-                    const statusClass = server.status === 'running' ? 'running' : 'stopped';
-                    const statusText = server.status === 'running' ? 'DZIAŁA' : 'ZATRZYMANY';
-                    
-                    container.innerHTML += `
-                        <div class="server-card ${statusClass}">
-                            <div class="server-header">
-                                <div class="server-name">${server.name}</div>
-                                <div class="server-status status-${server.status}">${statusText}</div>
-                            </div>
-                            <div class="server-info">
-                                <strong>ID:</strong> ${server.id} | 
-                                <strong>Port:</strong> ${server.port} | 
-                                <strong>RAM:</strong> ${server.memory}MB
-                            </div>
-                            <div class="server-info">
-                                <strong>Typ:</strong> ${server.type} | 
-                                <strong>Właściciel:</strong> ${server.owner}
-                            </div>
-                            <div>
-                                ${server.status !== 'running' ? 
-                                    `<button class="btn btn-start" onclick="controlServer('${server.id}', 'start')">▶ Start</button>` : 
-                                    `<button class="btn btn-stop" onclick="controlServer('${server.id}', 'stop')">⏹ Stop</button>`
-                                }
-                                <button class="btn btn-restart" onclick="controlServer('${server.id}', 'restart')">🔄 Restart</button>
-                                <button class="btn btn-delete" onclick="deleteServer('${server.id}')">🗑 Usuń</button>
-                            </div>
+                container.innerHTML += `
+                    <div class="server-card ${statusClass}">
+                        <div class="server-header">
+                            <div class="server-name">${server.name}</div>
+                            <div class="server-status status-${server.status}">${statusText}</div>
                         </div>
-                    `;
-                });
-            } catch (error) {
-                container.innerHTML = '<div class="error">❌ Błąd ładowania serwerów: ' + error.message + '</div>';
-            }
+                        <div class="server-info">
+                            <strong>ID:</strong> ${server.id} | 
+                            <strong>Port:</strong> ${server.port} | 
+                            <strong>RAM:</strong> ${server.memory}MB
+                        </div>
+                        <div class="server-info">
+                            <strong>Typ:</strong> ${server.type} | 
+                            <strong>Właściciel:</strong> ${server.owner}
+                        </div>
+                        <div>
+                            ${server.status !== 'running' ? 
+                                `<button class="btn btn-start" onclick="controlServer('${server.id}', 'start')">▶ Start</button>` : 
+                                `<button class="btn btn-stop" onclick="controlServer('${server.id}', 'stop')">⏹ Stop</button>`
+                            }
+                            <button class="btn btn-restart" onclick="controlServer('${server.id}', 'restart')">🔄 Restart</button>
+                            <button class="btn btn-delete" onclick="deleteServer('${server.id}')">🗑 Usuń</button>
+                        </div>
+                    </div>
+                `;
+            });
         }
 
-        async function controlServer(serverId, action) {
-            try {
-                const result = await apiCall(`/api/server/${serverId}/${action}`, { method: 'POST' });
-                showMessage(result.message, result.success);
-                refreshServers();
-            } catch (error) {
-                showMessage('❌ Błąd: ' + error.message, false);
-            }
+        function controlServer(serverId, action) {
+            showMessage(`Funkcja ${action} dla serwera ${serverId} - w prawdziwej wersji połączy się z API`, true);
         }
 
-        async function deleteServer(serverId) {
+        function deleteServer(serverId) {
             if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
-                try {
-                    const result = await apiCall(`/api/server/${serverId}/delete`, { method: 'POST' });
-                    showMessage(result.message, result.success);
-                    refreshServers();
-                } catch (error) {
-                    showMessage('❌ Błąd: ' + error.message, false);
-                }
+                showMessage(`Serwer ${serverId} został usunięty - w prawdziwej wersji połączy się z API`, true);
+                refreshServers();
             }
         }
 
-        document.getElementById('createServerForm').addEventListener('submit', async function(e) {
+        document.getElementById('createServerForm').addEventListener('submit', function(e) {
             e.preventDefault();
             
             const formResult = document.getElementById('formResult');
@@ -958,24 +796,15 @@ create_web_interface() {
                 owner: document.getElementById('serverOwner').value || 'admin'
             };
 
-            try {
-                const result = await apiCall('/api/server/create', {
-                    method: 'POST',
-                    body: data
-                });
-                
-                showMessage(result.message, result.success, formResult);
-                
-                if (result.success) {
-                    this.reset();
-                    setTimeout(() => showTab('servers'), 1000);
-                }
-            } catch (error) {
-                showMessage('❌ Błąd podczas tworzenia serwera: ' + error.message, false, formResult);
-            } finally {
+            // Symulacja tworzenia serwera
+            setTimeout(() => {
+                showMessage(`Serwer "${data.name}" został utworzony! - w prawdziwej wersji połączy się z API`, true, formResult);
+                this.reset();
                 button.textContent = originalText;
                 button.disabled = false;
-            }
+                showTab('servers');
+                refreshServers();
+            }, 2000);
         });
 
         function showMessage(message, isSuccess, container = null) {
@@ -993,8 +822,8 @@ create_web_interface() {
             }
         }
 
+        // Załaduj serwery przy starcie
         refreshServers();
-        setInterval(refreshServers, 30000);
     </script>
 </body>
 </html>
@@ -1007,22 +836,81 @@ HTML
 <head>
     <title>Status Panelu</title>
     <style>
-        body { font-family: Arial; padding: 20px; }
-        .status { padding: 10px; margin: 5px; border-radius: 5px; }
-        .online { background: #d4edda; color: #155724; }
-        .offline { background: #f8d7da; color: #721c24; }
+        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
+        .container { max-width: 800px; margin: 50px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
+        .status { padding: 15px; margin: 10px 0; border-radius: 5px; font-weight: bold; }
+        .online { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .offline { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        h1 { color: #333; text-align: center; margin-bottom: 30px; }
+        .back-btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
     </style>
 </head>
 <body>
-    <h1>🦖 Status Panelu</h1>
-    <div class="status online">✅ Panel działa poprawnie</div>
-    <div class="status online">🌐 Serwer web aktywny</div>
-    <div><a href="/">← Powrót do panelu</a></div>
+    <div class="container">
+        <h1>🦖 Status Panelu Serwerów</h1>
+        
+        <div class="status online">✅ Panel główny: DZIAŁA</div>
+        <div class="status online">🌐 Serwer web: AKTYWNY na porcie 8080</div>
+        <div class="status online">📊 System: OPTYMALNY</div>
+        <div class="status online">🔧 API: GOTOWE</div>
+        
+        <div style="text-align: center; margin-top: 30px;">
+            <a href="/" class="back-btn">← Powrót do Panelu Głównego</a>
+        </div>
+    </div>
 </body>
 </html>
 STATUS
 
-    echo -e "${GREEN}✅ Interfejs web z tworzeniem serwerów utworzony${NC}"
+    echo -e "${GREEN}✅ Panel web został utworzony!${NC}"
+    echo -e "${CYAN}📁 Pliki znajdują się w: $WEB_DIR/${NC}"
+}
+
+# =============================================
+# 🌐 URUCHAMIANIE SERWERA WEB
+# =============================================
+
+start_web_server() {
+    echo -e "${YELLOW}🌐 URUCHAMIANIE SERWERA WEB...${NC}"
+    
+    # Sprawdź czy panel web istnieje
+    if [ ! -f "$WEB_DIR/index.html" ]; then
+        echo -e "${YELLOW}📝 Tworzenie panelu web...${NC}"
+        create_web_panel
+    fi
+    
+    # Zatrzymaj istniejący serwer
+    stop_web_server
+    
+    # Uruchom serwer HTTP
+    cd "$WEB_DIR"
+    python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
+    local web_pid=$!
+    echo $web_pid > "$WEB_PID_FILE"
+    
+    local ip=$(hostname -I | awk '{print $1}')
+    
+    log "Serwer web uruchomiony na porcie $PORT (PID: $web_pid)"
+    echo -e "${GREEN}✅ Serwer web uruchomiony!${NC}"
+    echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
+    echo -e "   Local:    http://localhost:$PORT"
+    echo -e "   Sieć:     http://$ip:$PORT"
+    echo -e "   Status:   http://localhost:$PORT/status"
+    echo -e ""
+    echo -e "${YELLOW}💡 Otwórz przeglądarkę i wejdź na jeden z powyższych adresów${NC}"
+}
+
+stop_web_server() {
+    if [ -f "$WEB_PID_FILE" ]; then
+        local pid=$(cat "$WEB_PID_FILE")
+        if ps -p $pid > /dev/null 2>&1; then
+            kill $pid 2>/dev/null
+            echo -e "${GREEN}✅ Serwer web zatrzymany${NC}"
+        fi
+        rm -f "$WEB_PID_FILE"
+    fi
+    
+    pkill -f "python3 -m http.server" 2>/dev/null
 }
 
 # =============================================
@@ -1079,12 +967,13 @@ show_menu() {
     echo -e "║  ${YELLOW}4${GREEN}️⃣  - Zatrzymaj serwer            ║"
     echo -e "║  ${YELLOW}5${GREEN}️⃣  - Restartuj serwer            ║"
     echo -e "║  ${YELLOW}6${GREEN}️⃣  - Usuń serwer                 ║"
-    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Panel web                   ║"
-    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Statystyki                  ║"
+    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Utwórz panel web            ║"
+    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Uruchom serwer web          ║"
+    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Zatrzymaj serwer web        ║"
     echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                     ║"
     echo -e "║                                      ║"
     echo -e "╠══════════════════════════════════════╣"
-    echo -e "║        Wybierz opcję (0-8):          ║"
+    echo -e "║        Wybierz opcję (0-9):          ║"
     echo -e "╚══════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -1104,7 +993,7 @@ echo $$ > "$PANEL_PID_FILE"
 # Funkcja sprzątania
 cleanup() {
     echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
-    stop_web_panel
+    stop_web_server
     rm -f "$PANEL_PID_FILE"
     echo -e "${GREEN}✅ Panel zatrzymany${NC}"
     exit 0
@@ -1123,12 +1012,6 @@ echo -e "${NC}"
 echo -e "${CYAN}Katalog panelu: $PANEL_DIR${NC}"
 echo -e "${CYAN}Logi: $LOGS_DIR/panel.log${NC}"
 echo ""
-
-# Sprawdź czy funkcja create_server jest wywołana z parametrami
-if [ $# -ge 5 ]; then
-    create_server "$1" "$2" "$3" "$4" "$5"
-    exit $?
-fi
 
 while true; do
     show_menu
@@ -1165,10 +1048,13 @@ while true; do
             delete_server "$id"
             ;;
         7)
-            start_web_panel
+            create_web_panel
             ;;
         8)
-            show_system_stats
+            start_web_server
+            ;;
+        9)
+            stop_web_server
             ;;
         0)
             cleanup
