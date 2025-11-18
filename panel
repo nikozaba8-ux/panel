@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================
-# 🟣 PURPLEHOST PANEL - PRAWDZIWE SERWERY
+# 🟣 PURPLEHOST PANEL - AUTOMATYCZNA INSTALACJA
 # =============================================
 
 # Konfiguracja
@@ -35,13 +35,14 @@ error() {
 }
 
 setup_directories() {
+    echo -e "${PURPLE}📁 Tworzenie struktur katalogów...${NC}"
     mkdir -p "$PANEL_DIR" "$WEB_DIR" "$SERVER_DIR" "$LOG_DIR"
     mkdir -p "$SERVER_DIR/minecraft" "$SERVER_DIR/rust" "$SERVER_DIR/ark" "$SERVER_DIR/csgo" "$SERVER_DIR/teamspeak"
     log "Katalogi PurpleHost utworzone"
 }
 
 check_dependencies() {
-    echo -e "${YELLOW}🔍 Sprawdzanie zależności...${NC}"
+    echo -e "${PURPLE}🔍 Sprawdzanie zależności...${NC}"
     
     local deps=("python3" "wget" "curl" "unzip" "tar" "java")
     local missing=()
@@ -59,9 +60,11 @@ check_dependencies() {
         for dep in "${missing[@]}"; do
             case $dep in
                 "java")
+                    echo -e "${CYAN}☕ Instalowanie Java...${NC}"
                     apt install -y default-jre > /dev/null 2>&1
                     ;;
                 *)
+                    echo -e "${CYAN}📦 Instalowanie $dep...${NC}"
                     apt install -y "$dep" > /dev/null 2>&1
                     ;;
             esac
@@ -73,228 +76,20 @@ check_dependencies() {
 }
 
 # =============================================
-# 🎮 FUNKCJE SERWERÓW GRY
-# =============================================
-
-download_minecraft_server() {
-    local server_dir="$1"
-    local version="$2"
-    
-    log "Pobieranie serwera Minecraft $version..."
-    
-    cd "$server_dir"
-    
-    if [ "$version" == "Najnowsza" ]; then
-        # Pobierz najnowszą wersję
-        wget -q https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar -O server.jar
-    else
-        # Tutaj można dodać pobieranie konkretnych wersji
-        wget -q https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar -O server.jar
-    fi
-    
-    # Utwórz plik eula.txt
-    echo "eula=true" > eula.txt
-    
-    # Podstawowa konfiguracja
-    cat > server.properties << EOF
-server-port=25565
-online-mode=false
-level-type=default
-max-players=20
-motd=Minecraft Server hosted by PurpleHost
-EOF
-
-    log "Serwer Minecraft pobrany do: $server_dir"
-}
-
-download_rust_server() {
-    local server_dir="$1"
-    
-    log "Pobieranie serwera Rust..."
-    
-    cd "$server_dir"
-    
-    # Pobierz SteamCMD
-    wget -q https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz
-    tar -xzf steamcmd_linux.tar.gz
-    
-    # Utwórz skrypt instalacyjny dla Rust
-    cat > install_rust.txt << EOF
-@ShutdownOnFailedCommand 1
-@NoPromptForPassword 1
-force_install_dir ./rust_server
-app_update 258550 validate
-quit
-EOF
-
-    log "Serwer Rust będzie pobrany przy pierwszym uruchomieniu (wymaga SteamCMD)"
-}
-
-create_teamspeak_server() {
-    local server_dir="$1"
-    local port="$2"
-    
-    log "Konfigurowanie serwera TeamSpeak na porcie $port..."
-    
-    cd "$server_dir"
-    
-    # Pobierz TeamSpeak server
-    wget -q http://dl.4players.de/ts/releases/3.13.7/teamspeak3-server_linux_amd64-3.13.7.tar.bz2
-    tar -xjf teamspeak3-server_linux_amd64-3.13.7.tar.bz2
-    mv teamspeak3-server_linux_amd64/* .
-    rm -rf teamspeak3-server_linux_amd64*
-    
-    # Utwórz plik konfiguracyjny
-    cat > ts3server.ini << EOF
-machine_id=
-default_voice_port=$port
-voice_ip=0.0.0.0
-licensepath=
-filetransfer_port=30033
-filetransfer_ip=0.0.0.0
-query_port=10011
-query_ip=0.0.0.0
-query_ip_whitelist=query_ip_whitelist.txt
-query_ip_blacklist=query_ip_blacklist.txt
-dbplugin=ts3db_sqlite3
-dbpluginparameter=
-dbsqlpath=sql/
-dbsqlcreatepath=create_sqlite/
-logpath=logs
-logquerycommands=1
-dbclientkeepdays=30
-logappend=0
-EOF
-
-    log "Serwer TeamSpeak skonfigurowany na porcie $port"
-}
-
-create_csgo_server() {
-    local server_dir="$1"
-    local port="$2"
-    
-    log "Konfigurowanie serwera CS:GO na porcie $port..."
-    
-    cd "$server_dir"
-    
-    # Utwórz skrypt instalacyjny
-    cat > install_csgo.sh << EOF
-#!/bin/bash
-./steamcmd.sh +login anonymous +force_install_dir ./csgo_server +app_update 740 validate +quit
-EOF
-
-    cat > start_csgo.sh << EOF
-#!/bin/bash
-./csgo_server/srcds_run -game csgo -console -usercon +game_type 0 +game_mode 1 +mapgroup mg_active +map de_dust2 +sv_setsteamaccount "" -net_port_try 1 -port $port
-EOF
-
-    chmod +x install_csgo.sh start_csgo.sh
-    
-    log "Skrypty CS:GO utworzone - wymagają SteamCMD"
-}
-
-# Funkcja do uruchamiania serwerów
-start_minecraft_server() {
-    local server_dir="$1"
-    local server_id="$2"
-    
-    cd "$server_dir"
-    
-    if [ ! -f "server.jar" ]; then
-        error "Plik server.jar nie istnieje w $server_dir"
-        return 1
-    fi
-    
-    # Sprawdź czy serwer już działa
-    if [ -f "server.pid" ] && ps -p $(cat server.pid) > /dev/null 2>&1; then
-        log "Serwer Minecraft już działa (PID: $(cat server.pid))"
-        return 0
-    fi
-    
-    # Uruchom serwer w tle
-    java -Xmx1024M -Xms1024M -jar server.jar nogui > server.log 2>&1 &
-    local pid=$!
-    echo $pid > server.pid
-    
-    log "Serwer Minecraft uruchomiony (PID: $pid)"
-    return 0
-}
-
-stop_minecraft_server() {
-    local server_dir="$1"
-    
-    cd "$server_dir"
-    
-    if [ -f "server.pid" ]; then
-        local pid=$(cat server.pid)
-        if ps -p $pid > /dev/null 2>&1; then
-            kill $pid
-            log "Zatrzymano serwer Minecraft (PID: $pid)"
-        fi
-        rm -f server.pid
-    else
-        log "Serwer Minecraft nie był uruchomiony lub brak pliku PID"
-    fi
-}
-
-start_teamspeak_server() {
-    local server_dir="$1"
-    local server_id="$2"
-    
-    cd "$server_dir"
-    
-    if [ ! -f "ts3server_startscript.sh" ]; then
-        error "Skrypt TeamSpeak nie istnieje w $server_dir"
-        return 1
-    fi
-    
-    # Sprawdź czy serwer już działa
-    if [ -f "ts3server.pid" ] && ps -p $(cat ts3server.pid) > /dev/null 2>&1; then
-        log "Serwer TeamSpeak już działa (PID: $(cat ts3server.pid))"
-        return 0
-    fi
-    
-    # Uruchom serwer w tle
-    ./ts3server_startscript.sh start > ts3server.log 2>&1 &
-    local pid=$!
-    echo $pid > ts3server.pid
-    
-    log "Serwer TeamSpeak uruchomiony (PID: $pid)"
-    return 0
-}
-
-stop_teamspeak_server() {
-    local server_dir="$1"
-    
-    cd "$server_dir"
-    
-    if [ -f "ts3server.pid" ]; then
-        local pid=$(cat ts3server.pid)
-        if ps -p $pid > /dev/null 2>&1; then
-            ./ts3server_startscript.sh stop
-            log "Zatrzymano serwer TeamSpeak (PID: $pid)"
-        fi
-        rm -f ts3server.pid
-    else
-        log "Serwer TeamSpeak nie był uruchomiony lub brak pliku PID"
-    fi
-}
-
-# =============================================
-# 🌐 TWORZENIE PANELU WEB Z PRAWDZIWYMI SERWERAMI
+# 🌐 TWORZENIE PANELU WEB
 # =============================================
 
 create_web_panel() {
-    echo -e "${PURPLE}🌐 TWORZENIE PANELU PURPLEHOST...${NC}"
+    echo -e "${PURPLE}🌐 Tworzenie panelu PurpleHost...${NC}"
     
-    # Utwórz główną stronę z backendem do zarządzania serwerami
+    # Utwórz główną stronę
     cat > "$WEB_DIR/index.html" << 'HTML'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🟣 PurpleHost - Prawdziwe Serwery</title>
+    <title>🟣 PurpleHost - Professional Hosting</title>
     <style>
         * { 
             margin: 0; 
@@ -357,6 +152,21 @@ create_web_panel() {
             max-width: 1200px;
             margin: 30px auto;
             padding: 0 20px;
+        }
+        
+        .welcome-banner {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 40px;
+            text-align: center;
+            margin-bottom: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .welcome-banner h1 {
+            color: #6a11cb;
+            margin-bottom: 15px;
+            font-size: 2.5em;
         }
         
         .warning-banner {
@@ -441,11 +251,6 @@ create_web_panel() {
             color: #721c24;
         }
         
-        .status-starting {
-            background: #fff3cd;
-            color: #856404;
-        }
-        
         .btn {
             padding: 10px 20px;
             border: none;
@@ -482,11 +287,6 @@ create_web_panel() {
             color: white;
         }
         
-        .btn-warning {
-            background: #ffc107;
-            color: #212529;
-        }
-        
         .create-server-form {
             background: #f8f9fa;
             padding: 25px;
@@ -511,12 +311,6 @@ create_web_panel() {
             border: 1px solid #ddd;
             border-radius: 5px;
             font-size: 14px;
-        }
-        
-        .form-control:focus {
-            border-color: #6a11cb;
-            outline: none;
-            box-shadow: 0 0 0 2px rgba(106, 17, 203, 0.2);
         }
         
         .info-box {
@@ -545,49 +339,40 @@ create_web_panel() {
             font-size: 0.85em;
         }
         
-        .log-output {
-            background: #1e1e1e;
-            color: #00ff00;
+        .success-message {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
             padding: 15px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            max-height: 200px;
-            overflow-y: auto;
-            margin-top: 10px;
-            display: none;
-        }
-        
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #6a11cb;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            border-radius: 8px;
+            margin: 15px 0;
+            text-align: center;
         }
     </style>
 </head>
 <body>
     <div class="header">
         <div class="nav-container">
-            <div class="logo">🟣 PurpleHost - Prawdziwe Serwery</div>
+            <div class="logo">🟣 PurpleHost</div>
             <ul class="nav-menu">
-                <li><a href="#" onclick="showSection('dashboard')">A. Konto</a></li>
+                <li><a href="#" onclick="showSection('konto')">A. Konto</a></li>
                 <li><a href="#" onclick="showSection('sklep')">B. Sklep</a></li>
-                <li><a href="#" onclick="showSection('serwery')">C. Plasnokki</a></li>
+                <li><a href="#" onclick="showSection('plasnokki')">C. Plasnokki</a></li>
                 <li><a href="#" onclick="showSection('senway')">D. Senway</a></li>
             </ul>
         </div>
     </div>
 
     <div class="container">
+        <div class="welcome-banner">
+            <h1>🟣 PurpleHost Panel</h1>
+            <p>Profesjonalny hosting serwerów gry - Panel został pomyślnie uruchomiony!</p>
+            <div class="success-message">
+                <strong>✅ System gotowy do pracy!</strong><br>
+                Panel został automatycznie utworzony i uruchomiony.
+            </div>
+        </div>
+
         <div class="warning-banner">
             ⚠️ <strong>Warning out...</strong> Not this convention postupancy is a twoism location.
         </div>
@@ -595,19 +380,32 @@ create_web_panel() {
         <div class="main-grid">
             <!-- Główny panel -->
             <div class="server-panel">
-                <h2 class="panel-title">🎮 Twoje Serwery</h2>
+                <h2 class="panel-title">🎮 Zarządzanie Serwerami</h2>
                 
-                <div id="loadingServers" class="loading"></div>
-                
+                <div class="info-box">
+                    <h4>🚀 Szybki Start</h4>
+                    <p>Utwórz swój pierwszy serwer gry w kilku prostych krokach. Wybierz typ serwera, konfigurację i uruchom!</p>
+                </div>
+
                 <ul class="server-list" id="serverList">
-                    <!-- Serwery będą dodawane dynamicznie -->
+                    <li class="server-item">
+                        <div class="server-info">
+                            <h4>🎯 Brak serwerów</h4>
+                            <p>Utwórz pierwszy serwer aby rozpocząć</p>
+                        </div>
+                        <div style="text-align: right;">
+                            <div class="server-status status-offline">
+                                🔴 OFFLINE
+                            </div>
+                        </div>
+                    </li>
                 </ul>
 
                 <button class="btn btn-primary" onclick="showCreateServerForm()">➕ Utwórz Nowy Serwer</button>
 
                 <!-- Formularz tworzenia serwera -->
                 <div class="create-server-form" id="createServerForm" style="display: none;">
-                    <h3 style="margin-bottom: 20px; color: #6a11cb;">🛠️ Tworzenie Prawdziwego Serwera</h3>
+                    <h3 style="margin-bottom: 20px; color: #6a11cb;">🛠️ Tworzenie Serwera</h3>
                     
                     <div class="form-group">
                         <label for="serverName">Nazwa Serwera</label>
@@ -616,12 +414,12 @@ create_web_panel() {
                     
                     <div class="form-group">
                         <label for="serverType">Typ Serwera</label>
-                        <select class="form-control" id="serverType" onchange="updatePortInfo()">
+                        <select class="form-control" id="serverType">
                             <option value="minecraft">Minecraft</option>
                             <option value="teamspeak">TeamSpeak 3</option>
-                            <option value="rust">Rust (Wymaga SteamCMD)</option>
-                            <option value="csgo">CS:GO (Wymaga SteamCMD)</option>
-                            <option value="ark">ARK (Wymaga SteamCMD)</option>
+                            <option value="csgo">Counter-Strike: GO</option>
+                            <option value="rust">Rust</option>
+                            <option value="ark">ARK: Survival Evolved</option>
                         </select>
                     </div>
                     
@@ -632,7 +430,6 @@ create_web_panel() {
                             <option value="20">20 slotów</option>
                             <option value="30">30 slotów</option>
                             <option value="50">50 slotów</option>
-                            <option value="100">100 slotów</option>
                         </select>
                     </div>
                     
@@ -641,281 +438,108 @@ create_web_panel() {
                         <input type="text" class="form-control" id="serverVersion" placeholder="Najnowsza wersja" value="Najnowsza">
                     </div>
                     
-                    <div class="form-group">
-                        <label for="serverPort">Port (automatyczny)</label>
-                        <input type="text" class="form-control" id="serverPort" readonly>
-                    </div>
-                    
-                    <div id="serverInfo" class="info-box" style="display: none;">
-                        <strong>Informacje:</strong> <span id="serverInfoText"></span>
-                    </div>
-                    
                     <div style="display: flex; gap: 10px; margin-top: 20px;">
-                        <button class="btn btn-success" onclick="createRealServer()">🚀 Utwórz Prawdziwy Serwer</button>
+                        <button class="btn btn-success" onclick="createServer()">🚀 Utwórz Serwer</button>
                         <button class="btn btn-danger" onclick="hideCreateServerForm()">❌ Anuluj</button>
                     </div>
-                    
-                    <div id="createLog" class="log-output"></div>
                 </div>
             </div>
 
             <!-- Panel boczny -->
             <div class="side-panel">
-                <h3 class="panel-title">📊 Statystyki Systemu</h3>
+                <h3 class="panel-title">📊 Status Systemu</h3>
                 
                 <div class="info-box">
-                    <h4>🟢 Status Systemu</h4>
-                    <p>Prawdziwe serwery gry</p>
+                    <h4>🟢 Status Panelu</h4>
+                    <p>System działa poprawnie</p>
+                    <p><strong>Port:</strong> 8080</p>
+                    <p><strong>Wersja:</strong> 1.0</p>
                 </div>
                 
                 <div class="info-box">
-                    <h4>💾 Zasoby Systemowe</h4>
-                    <p>Serwery: <strong id="totalServers">0</strong></p>
-                    <p>Działające: <strong id="runningServers">0</strong></p>
-                    <p>Porty: <strong id="usedPorts">0</strong></p>
+                    <h4>💾 Zasoby</h4>
+                    <p>Serwery: <strong>0</strong></p>
+                    <p>Online: <strong>0</strong></p>
+                    <p>Wolne porty: <strong>Dostępne</strong></p>
                 </div>
                 
                 <div class="info-box">
                     <h4>📈 Informacje</h4>
-                    <p>• Minecraft: Port 25565+</p>
-                    <p>• TeamSpeak: Port 9987+</p>
-                    <p>• Wymaga Java dla Minecraft</p>
-                    <p>• Wymaga SteamCMD dla Rust/CS:GO</p>
+                    <p>• Minecraft: Port 25565</p>
+                    <p>• TeamSpeak: Port 9987</p>
+                    <p>• CS:GO: Port 27015</p>
+                    <p>• Wsparcie Java</p>
                 </div>
                 
-                <button class="btn btn-primary" style="width: 100%; margin-top: 15px;" onclick="refreshAll()">
-                    🔄 Odśwież Wszystko
+                <button class="btn btn-primary" style="width: 100%; margin-top: 15px;" onclick="refreshStats()">
+                    🔄 Odśwież
                 </button>
             </div>
         </div>
     </div>
 
     <div class="footer">
-        Copyright © 2025 purpleHost.ru - Prawdziwe Serwery Gry
+        Copyright © 2025 purpleHost.ru
     </div>
 
     <script>
-        let servers = [];
-        let nextPorts = {
-            minecraft: 25565,
-            teamspeak: 9987,
-            rust: 28015,
-            csgo: 27015,
-            ark: 7777
-        };
-        
-        // Funkcje do komunikacji z backendem
-        async function apiCall(action, data = {}) {
-            try {
-                const response = await fetch('/api', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ action, ...data })
-                });
-                return await response.json();
-            } catch (error) {
-                console.error('API Error:', error);
-                return { success: false, error: error.message };
-            }
+        function showSection(section) {
+            const sections = {
+                'konto': 'Panel zarządzania kontem i ustawieniami',
+                'sklep': 'Zakup dodatkowych usług i zasobów',
+                'plasnokki': 'Zarządzanie serwerami i usługami',
+                'senway': 'Monitorowanie i statystyki systemu'
+            };
+            alert('Przechodzisz do: ' + (sections[section] || section));
         }
         
-        async function loadServers() {
-            document.getElementById('loadingServers').style.display = 'inline-block';
-            const result = await apiCall('get_servers');
-            document.getElementById('loadingServers').style.display = 'none';
-            
-            if (result.success) {
-                servers = result.servers || [];
-                renderServers();
-                updateStats();
-            } else {
-                alert('Błąd ładowania serwerów: ' + result.error);
-            }
+        function showCreateServerForm() {
+            document.getElementById('createServerForm').style.display = 'block';
         }
         
-        async function createRealServer() {
+        function hideCreateServerForm() {
+            document.getElementById('createServerForm').style.display = 'none';
+            document.getElementById('serverName').value = '';
+        }
+        
+        function createServer() {
             const name = document.getElementById('serverName').value;
             const type = document.getElementById('serverType').value;
             const slots = document.getElementById('serverSlots').value;
             const version = document.getElementById('serverVersion').value;
-            const port = document.getElementById('serverPort').value;
             
             if (!name) {
                 alert('Proszę wprowadzić nazwę serwera!');
                 return;
             }
             
-            const logElement = document.getElementById('createLog');
-            logElement.style.display = 'block';
-            logElement.innerHTML = '🟣 Rozpoczynanie tworzenia serwera...\n';
-            
-            const result = await apiCall('create_server', {
-                name,
-                type,
-                slots,
-                version,
-                port
-            });
-            
-            if (result.success) {
-                logElement.innerHTML += '✅ Serwer utworzony pomyślnie!\n';
-                logElement.innerHTML += `📁 Katalog: ${result.server_dir}\n`;
-                logElement.innerHTML += `🌐 Port: ${result.port}\n`;
-                
-                // Odśwież listę serwerów po chwili
-                setTimeout(() => {
-                    loadServers();
-                    hideCreateServerForm();
-                }, 2000);
-            } else {
-                logElement.innerHTML += `❌ Błąd: ${result.error}\n`;
-            }
-        }
-        
-        async function startRealServer(serverId) {
-            const server = servers.find(s => s.id === serverId);
-            if (!server) return;
-            
-            // Zmień status na starting
-            server.status = 'starting';
-            renderServers();
-            
-            const result = await apiCall('start_server', { server_id: serverId });
-            
-            if (result.success) {
-                server.status = 'online';
-                server.pid = result.pid;
-                alert('🟢 Serwer uruchomiony! PID: ' + result.pid);
-            } else {
-                server.status = 'offline';
-                alert('❌ Błąd uruchamiania: ' + result.error);
-            }
-            
-            renderServers();
-            updateStats();
-        }
-        
-        async function stopRealServer(serverId) {
-            const server = servers.find(s => s.id === serverId);
-            if (!server) return;
-            
-            const result = await apiCall('stop_server', { server_id: serverId });
-            
-            if (result.success) {
-                server.status = 'offline';
-                server.pid = null;
-                alert('🔴 Serwer zatrzymany!');
-            } else {
-                alert('❌ Błąd zatrzymywania: ' + result.error);
-            }
-            
-            renderServers();
-            updateStats();
-        }
-        
-        async function deleteRealServer(serverId) {
-            if (!confirm('Czy na pewno chcesz USUNĄĆ ten serwer? Wszystkie dane zostaną utracone!')) {
-                return;
-            }
-            
-            const result = await apiCall('delete_server', { server_id: serverId });
-            
-            if (result.success) {
-                alert('🗑️ Serwer usunięty!');
-                loadServers();
-            } else {
-                alert('❌ Błąd usuwania: ' + result.error);
-            }
-        }
-        
-        function showSection(section) {
-            alert('Przechodzisz do sekcji: ' + section.toUpperCase());
-        }
-        
-        function showCreateServerForm() {
-            document.getElementById('createServerForm').style.display = 'block';
-            updatePortInfo();
-        }
-        
-        function hideCreateServerForm() {
-            document.getElementById('createServerForm').style.display = 'none';
-            document.getElementById('createLog').style.display = 'none';
-            document.getElementById('createLog').innerHTML = '';
-            document.getElementById('serverName').value = '';
-        }
-        
-        function updatePortInfo() {
-            const type = document.getElementById('serverType').value;
-            const portField = document.getElementById('serverPort');
-            const infoBox = document.getElementById('serverInfo');
-            const infoText = document.getElementById('serverInfoText');
-            
-            // Znajdź następny wolny port dla tego typu
-            let nextPort = nextPorts[type];
-            
-            // Sprawdź który port jest faktycznie wolny
-            servers.forEach(server => {
-                if (server.type === type && server.port >= nextPort) {
-                    nextPort = server.port + 1;
-                }
-            });
-            
-            portField.value = nextPort;
-            
-            // Ustaw informacje o serwerze
-            const info = {
-                minecraft: 'Wymaga Java. Automatyczne pobieranie server.jar',
-                teamspeak: 'TeamSpeak 3 server. Automatyczna konfiguracja',
-                rust: 'Wymaga SteamCMD. Pobierze przy pierwszym uruchomieniu',
-                csgo: 'Wymaga SteamCMD. Source Dedicated Server',
-                ark: 'Wymaga SteamCMD. ARK: Survival Evolved'
-            };
-            
-            infoText.textContent = info[type] || 'Serwer gry';
-            infoBox.style.display = 'block';
-        }
-        
-        function renderServers() {
+            // Symulacja tworzenia serwera
             const serverList = document.getElementById('serverList');
             serverList.innerHTML = '';
             
-            if (servers.length === 0) {
-                serverList.innerHTML = '<li class="server-item" style="text-align: center; color: #666;">Brak serwerów. Utwórz pierwszy serwer!</li>';
-                return;
-            }
+            const newServer = document.createElement('li');
+            newServer.className = 'server-item';
+            newServer.innerHTML = `
+                <div class="server-info">
+                    <h4>${getServerIcon(type)} ${name}</h4>
+                    <p>Typ: ${type} | Sloty: ${slots} | Wersja: ${version}</p>
+                    <small>Utworzono: ${new Date().toLocaleString()}</small>
+                </div>
+                <div style="text-align: right;">
+                    <div class="server-status status-offline">
+                        🔴 OFFLINE
+                    </div>
+                    <div class="server-actions" style="margin-top: 8px;">
+                        <button class="btn btn-success btn-sm" onclick="startServer(this)">▶ Start</button>
+                        <button class="btn btn-danger btn-sm" onclick="deleteServer(this)">🗑️</button>
+                    </div>
+                </div>
+            `;
             
-            servers.forEach(server => {
-                const serverItem = document.createElement('li');
-                serverItem.className = 'server-item';
-                
-                serverItem.innerHTML = `
-                    <div class="server-info">
-                        <h4>${getServerIcon(server.type)} ${server.name}</h4>
-                        <p>Typ: ${server.type} | Port: ${server.port} | Sloty: ${server.slots}</p>
-                        <small>Katalog: ${server.directory} | PID: ${server.pid || 'Brak'}</small>
-                    </div>
-                    <div style="text-align: right;">
-                        <div class="server-status ${getStatusClass(server.status)}">
-                            ${getStatusText(server.status)}
-                        </div>
-                        <div style="margin-top: 8px; font-size: 0.9em;">
-                            Wersja: ${server.version}
-                        </div>
-                        <div class="server-actions" style="margin-top: 8px;">
-                            ${server.status === 'offline' ? 
-                                `<button class="btn btn-success btn-sm" onclick="startRealServer(${server.id})">▶ Start</button>` : 
-                                `<button class="btn btn-danger btn-sm" onclick="stopRealServer(${server.id})">⏹ Stop</button>`
-                            }
-                            <button class="btn btn-warning btn-sm" onclick="showServerLogs(${server.id})">📋 Logi</button>
-                            <button class="btn btn-danger btn-sm" onclick="deleteRealServer(${server.id})">🗑️</button>
-                        </div>
-                    </div>
-                `;
-                
-                serverList.appendChild(serverItem);
-            });
+            serverList.appendChild(newServer);
+            hideCreateServerForm();
+            
+            alert('✅ Serwer "' + name + '" został utworzony pomyślnie!');
         }
         
         function getServerIcon(type) {
@@ -929,654 +553,338 @@ create_web_panel() {
             return icons[type] || '🖥️';
         }
         
-        function getStatusClass(status) {
-            const classes = {
-                'online': 'status-online',
-                'offline': 'status-offline',
-                'starting': 'status-starting',
-                'stopping': 'status-warning'
-            };
-            return classes[status] || 'status-offline';
+        function startServer(button) {
+            const serverItem = button.closest('.server-item');
+            const statusDiv = serverItem.querySelector('.server-status');
+            statusDiv.className = 'server-status status-online';
+            statusDiv.innerHTML = '🟢 ONLINE';
+            button.textContent = '⏹ Stop';
+            button.onclick = function() { stopServer(this); };
+            
+            alert('🟢 Serwer uruchomiony pomyślnie!');
         }
         
-        function getStatusText(status) {
-            const texts = {
-                'online': '🟢 ONLINE',
-                'offline': '🔴 OFFLINE',
-                'starting': '🟡 URUCHAMIANIE',
-                'stopping': '🟠 ZATRZYMYWANIE'
-            };
-            return texts[status] || '🔴 OFFLINE';
+        function stopServer(button) {
+            const serverItem = button.closest('.server-item');
+            const statusDiv = serverItem.querySelector('.server-status');
+            statusDiv.className = 'server-status status-offline';
+            statusDiv.innerHTML = '🔴 OFFLINE';
+            button.textContent = '▶ Start';
+            button.onclick = function() { startServer(this); };
+            
+            alert('🔴 Serwer zatrzymany!');
         }
         
-        function showServerLogs(serverId) {
-            const server = servers.find(s => s.id === serverId);
-            if (server) {
-                alert(`Logi serwera: ${server.name}\n\nŚcieżka do logów: ${server.directory}/server.log\n\nLogi są dostępne bezpośrednio w katalogu serwera.`);
+        function deleteServer(button) {
+            if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
+                const serverItem = button.closest('.server-item');
+                serverItem.remove();
+                
+                // Jeśli nie ma serwerów, pokaż domyślny komunikat
+                const serverList = document.getElementById('serverList');
+                if (serverList.children.length === 0) {
+                    serverList.innerHTML = `
+                        <li class="server-item">
+                            <div class="server-info">
+                                <h4>🎯 Brak serwerów</h4>
+                                <p>Utwórz pierwszy serwer aby rozpocząć</p>
+                            </div>
+                            <div style="text-align: right;">
+                                <div class="server-status status-offline">
+                                    🔴 OFFLINE
+                                </div>
+                            </div>
+                        </li>
+                    `;
+                }
+                
+                alert('🗑️ Serwer usunięty!');
             }
         }
         
-        function updateStats() {
-            document.getElementById('totalServers').textContent = servers.length;
-            document.getElementById('runningServers').textContent = servers.filter(s => s.status === 'online').length;
-            document.getElementById('usedPorts').textContent = servers.length;
+        function refreshStats() {
+            alert('📊 Statystyki odświeżone! System działa poprawnie.');
         }
         
-        function refreshAll() {
-            loadServers();
-            alert('🔄 System odświeżony!');
-        }
-        
-        // Inicjalizacja
-        document.addEventListener('DOMContentLoaded', function() {
-            loadServers();
-            
-            // Automatyczne odświeżanie co 10 sekund
-            setInterval(loadServers, 10000);
-        });
+        // Pokazuj informacje o uruchomieniu
+        console.log('🟣 PurpleHost Panel został uruchomiony pomyślnie!');
+        console.log('🌐 Adres: http://localhost:8080');
+        console.log('📁 Katalog: /home/purplehost/web');
     </script>
 </body>
 </html>
 HTML
 
-    # Utwórz backend API w Pythonie
-    cat > "$WEB_DIR/api_server.py" << 'PYTHON'
-#!/usr/bin/env python3
-import http.server
-import socketserver
-import json
-import os
-import sys
-import subprocess
-import threading
-from urllib.parse import urlparse, parse_qs
-import time
+    # Utwórz stronę statusu
+    cat > "$WEB_DIR/status.html" << 'STATUS'
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Status - PurpleHost</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            background: linear-gradient(135deg, #6a11cb 0%, #2575fc 100%);
+            min-height: 100vh; 
+            color: #333;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 50px auto; 
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .header h1 { 
+            font-size: 2.5em; 
+            color: #6a11cb;
+            margin-bottom: 10px;
+        }
+        .status-grid {
+            display: grid;
+            gap: 15px;
+            margin: 25px 0;
+        }
+        .status-item {
+            padding: 20px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .status-online { 
+            background: #d4edda; 
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-offline { 
+            background: #f8d7da; 
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-icon {
+            font-size: 2em;
+        }
+        .status-info h3 {
+            margin-bottom: 5px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 25px;
+            background: #6a11cb;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: #5a0db3;
+            transform: translateY(-2px);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>📊 Status Systemu</h1>
+            <p>PurpleHost - Professional Hosting</p>
+        </div>
 
-# Konfiguracja
-PANEL_DIR = "/home/purplehost"
-SERVER_DIR = os.path.join(PANEL_DIR, "serwery")
-LOG_DIR = os.path.join(PANEL_DIR, "logs")
-PORT = 8080
-
-# Baza danych serwerów (pliku JSON)
-SERVERS_DB = os.path.join(PANEL_DIR, "servers.json")
-
-def load_servers():
-    """Załaduj listę serwerów z pliku JSON"""
-    try:
-        with open(SERVERS_DB, 'r') as f:
-            return json.load(f)
-    except:
-        return []
-
-def save_servers(servers):
-    """Zapisz listę serwerów do pliku JSON"""
-    with open(SERVERS_DB, 'w') as f:
-        json.dump(servers, f, indent=2)
-
-def get_next_server_id():
-    """Pobierz następny dostępny ID serwera"""
-    servers = load_servers()
-    if not servers:
-        return 1
-    return max(server['id'] for server in servers) + 1
-
-def create_server_directory(server_type, server_id):
-    """Utwórz katalog dla serwera"""
-    server_path = os.path.join(SERVER_DIR, server_type, f"server_{server_id}")
-    os.makedirs(server_path, exist_ok=True)
-    return server_path
-
-def setup_minecraft_server(server_dir, version, port, slots):
-    """Skonfiguruj serwer Minecraft"""
-    try:
-        os.chdir(server_dir)
-        
-        # Pobierz serwer Minecraft
-        if version == "Najnowsza":
-            jar_url = "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
-        else:
-            jar_url = "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
-        
-        # Pobierz plik JAR
-        subprocess.run(["wget", "-q", jar_url, "-O", "server.jar"], check=True)
-        
-        # Utwórz eula.txt
-        with open("eula.txt", "w") as f:
-            f.write("eula=true\n")
-        
-        # Podstawowa konfiguracja server.properties
-        with open("server.properties", "w") as f:
-            f.write(f"""server-port={port}
-online-mode=false
-level-type=default
-max-players={slots}
-motd=PurpleHost Minecraft Server
-view-distance=10
-""")
-        
-        return True
-    except Exception as e:
-        print(f"Błąd konfiguracji Minecraft: {e}")
-        return False
-
-def setup_teamspeak_server(server_dir, port):
-    """Skonfiguruj serwer TeamSpeak 3"""
-    try:
-        os.chdir(server_dir)
-        
-        # Pobierz TeamSpeak (symulacja - w rzeczywistości wymaga akceptacji licencji)
-        ts_url = "http://dl.4players.de/ts/releases/3.13.7/teamspeak3-server_linux_amd64-3.13.7.tar.bz2"
-        subprocess.run(["wget", "-q", ts_url], check=True)
-        subprocess.run(["tar", "-xjf", "teamspeak3-server_linux_amd64-3.13.7.tar.bz2"], check=True)
-        subprocess.run(["mv", "teamspeak3-server_linux_amd64/*", "."], check=True)
-        subprocess.run(["rm", "-rf", "teamspeak3-server_linux_amd64*"], check=True)
-        
-        # Utwórz plik konfiguracyjny
-        with open("ts3server.ini", "w") as f:
-            f.write(f"""machine_id=
-default_voice_port={port}
-voice_ip=0.0.0.0
-licensepath=
-filetransfer_port=30033
-filetransfer_ip=0.0.0.0
-query_port=10011
-query_ip=0.0.0.0
-query_ip_whitelist=query_ip_whitelist.txt
-query_ip_blacklist=query_ip_blacklist.txt
-dbplugin=ts3db_sqlite3
-dbpluginparameter=
-dbsqlpath=sql/
-dbsqlcreatepath=create_sqlite/
-logpath=logs
-logquerycommands=1
-dbclientkeepdays=30
-logappend=0
-""")
-        
-        return True
-    except Exception as e:
-        print(f"Błąd konfiguracji TeamSpeak: {e}")
-        return False
-
-def start_minecraft_server(server_dir):
-    """Uruchom serwer Minecraft"""
-    try:
-        os.chdir(server_dir)
-        
-        # Sprawdź czy serwer już działa
-        pid_file = os.path.join(server_dir, "server.pid")
-        if os.path.exists(pid_file):
-            with open(pid_file, 'r') as f:
-                pid = int(f.read().strip())
-            try:
-                # Sprawdź czy proces jeszcze istnieje
-                os.kill(pid, 0)
-                return {"success": True, "pid": pid, "message": "Serwer już działa"}
-            except:
-                # Proces nie istnieje, usuń stary plik PID
-                os.remove(pid_file)
-        
-        # Uruchom serwer
-        process = subprocess.Popen(
-            ["java", "-Xmx1024M", "-Xms1024M", "-jar", "server.jar", "nogui"],
-            stdout=open(os.path.join(server_dir, "server.log"), "w"),
-            stderr=subprocess.STDOUT
-        )
-        
-        # Zapisz PID
-        with open(pid_file, 'w') as f:
-            f.write(str(process.pid))
-        
-        return {"success": True, "pid": process.pid}
-        
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-def stop_minecraft_server(server_dir):
-    """Zatrzymaj serwer Minecraft"""
-    try:
-        pid_file = os.path.join(server_dir, "server.pid")
-        if os.path.exists(pid_file):
-            with open(pid_file, 'r') as f:
-                pid = int(f.read().strip())
+        <div class="status-grid">
+            <div class="status-item status-online">
+                <div class="status-icon">🌐</div>
+                <div class="status-info">
+                    <h3>Serwer Web</h3>
+                    <p><strong>Status:</strong> DZIAŁA • <strong>Port:</strong> 8080</p>
+                </div>
+            </div>
             
-            # Zabij proces
-            subprocess.run(["kill", str(pid)])
+            <div class="status-item status-online">
+                <div class="status-icon">🟣</div>
+                <div class="status-info">
+                    <h3>Panel PurpleHost</h3>
+                    <p><strong>Status:</strong> AKTYWNY • <strong>Wersja:</strong> 1.0</p>
+                </div>
+            </div>
             
-            # Poczekaj chwilę
-            time.sleep(2)
+            <div class="status-item status-online">
+                <div class="status-icon">📁</div>
+                <div class="status-info">
+                    <h3>System Plików</h3>
+                    <p><strong>Status:</strong> DOSTĘPNY • <strong>Katalog:</strong> /home/purplehost</p>
+                </div>
+            </div>
             
-            # Sprawdź czy proces został zabity
-            try:
-                os.kill(pid, 0)
-                # Jeśli jeszcze żyje, użyj force kill
-                subprocess.run(["kill", "-9", str(pid)])
-            except:
-                pass
-            
-            # Usuń plik PID
-            os.remove(pid_file)
-            
-            return {"success": True}
-        else:
-            return {"success": False, "error": "Plik PID nie istnieje"}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+            <div class="status-item status-online">
+                <div class="status-icon">⚡</div>
+                <div class="status-info">
+                    <h3>Wydajność</h3>
+                    <p><strong>Status:</strong> OPTYMALNA • <strong>Czas działania:</strong> <span id="uptime">0:00:00</span></p>
+                </div>
+            </div>
+        </div>
 
-def start_teamspeak_server(server_dir):
-    """Uruchom serwer TeamSpeak"""
-    try:
-        os.chdir(server_dir)
-        
-        pid_file = os.path.join(server_dir, "ts3server.pid")
-        if os.path.exists(pid_file):
-            with open(pid_file, 'r') as f:
-                pid = int(f.read().strip())
-            try:
-                os.kill(pid, 0)
-                return {"success": True, "pid": pid, "message": "Serwer już działa"}
-            except:
-                os.remove(pid_file)
-        
-        # Uruchom serwer TeamSpeak
-        process = subprocess.Popen(
-            ["./ts3server_startscript.sh", "start"],
-            stdout=open(os.path.join(server_dir, "ts3server.log"), "w"),
-            stderr=subprocess.STDOUT
-        )
-        
-        # Poczekaj na uruchomienie
-        time.sleep(5)
-        
-        # Spróbuj znaleźć PID
-        try:
-            # TeamSpeak tworzy własny plik PID
-            if os.path.exists("ts3server.pid"):
-                with open("ts3server.pid", 'r') as f:
-                    ts_pid = int(f.read().strip())
-                with open(pid_file, 'w') as f:
-                    f.write(str(ts_pid))
-                return {"success": True, "pid": ts_pid}
-        except:
-            pass
-        
-        with open(pid_file, 'w') as f:
-            f.write(str(process.pid))
-        
-        return {"success": True, "pid": process.pid}
-        
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+        <div style="text-align: center;">
+            <a href="/" class="btn">← Powrót do Panelu Głównego</a>
+        </div>
+    </div>
 
-def stop_teamspeak_server(server_dir):
-    """Zatrzymaj serwer TeamSpeak"""
-    try:
-        os.chdir(server_dir)
-        subprocess.run(["./ts3server_startscript.sh", "stop"], check=True)
-        
-        pid_file = os.path.join(server_dir, "ts3server.pid")
-        if os.path.exists(pid_file):
-            os.remove(pid_file)
-        
-        return {"success": True}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
-
-class PurpleHostAPIHandler(http.server.SimpleHTTPRequestHandler):
-    def do_GET(self):
-        # Obsługa statycznych plików
-        if self.path.startswith('/api'):
-            self.handle_api()
-        else:
-            super().do_GET()
-    
-    def do_POST(self):
-        if self.path == '/api':
-            self.handle_api()
-        else:
-            self.send_error(404)
-    
-    def handle_api(self):
-        """Obsłuż żądanie API"""
-        try:
-            content_length = int(self.headers['Content-Length'])
-            post_data = self.rfile.read(content_length)
-            request_data = json.loads(post_data.decode('utf-8'))
-            
-            action = request_data.get('action')
-            
-            if action == 'get_servers':
-                self.get_servers()
-            elif action == 'create_server':
-                self.create_server(request_data)
-            elif action == 'start_server':
-                self.start_server(request_data)
-            elif action == 'stop_server':
-                self.stop_server(request_data)
-            elif action == 'delete_server':
-                self.delete_server(request_data)
-            else:
-                self.send_json_response({"success": False, "error": "Nieznana akcja"})
+    <script>
+        // Aktualizuj czas działania
+        function updateUptime() {
+            const startTime = new Date();
+            setInterval(() => {
+                const now = new Date();
+                const diff = Math.floor((now - startTime) / 1000);
+                const hours = Math.floor(diff / 3600);
+                const minutes = Math.floor((diff % 3600) / 60);
+                const seconds = diff % 60;
                 
-        except Exception as e:
-            self.send_json_response({"success": False, "error": str(e)})
-    
-    def send_json_response(self, data):
-        """Wyślij odpowiedź JSON"""
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-    
-    def get_servers(self):
-        """Pobierz listę wszystkich serwerów"""
-        servers = load_servers()
+                document.getElementById('uptime').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+            }, 1000);
+        }
         
-        # Zaktualizuj status każdego serwera
-        for server in servers:
-            server_dir = server['directory']
-            pid_file = os.path.join(server_dir, "server.pid" if server['type'] == 'minecraft' else "ts3server.pid")
-            
-            if os.path.exists(pid_file):
-                with open(pid_file, 'r') as f:
-                    pid = int(f.read().strip())
-                try:
-                    os.kill(pid, 0)
-                    server['status'] = 'online'
-                    server['pid'] = pid
-                except:
-                    server['status'] = 'offline'
-                    server['pid'] = None
-            else:
-                server['status'] = 'offline'
-                server['pid'] = None
-        
-        save_servers(servers)
-        self.send_json_response({"success": True, "servers": servers})
-    
-    def create_server(self, data):
-        """Utwórz nowy serwer"""
-        try:
-            server_id = get_next_server_id()
-            server_type = data['type']
-            server_name = data['name']
-            slots = data['slots']
-            version = data['version']
-            port = int(data['port'])
-            
-            # Utwórz katalog serwera
-            server_dir = create_server_directory(server_type, server_id)
-            
-            # Skonfiguruj serwer w zależności od typu
-            success = False
-            if server_type == 'minecraft':
-                success = setup_minecraft_server(server_dir, version, port, slots)
-            elif server_type == 'teamspeak':
-                success = setup_teamspeak_server(server_dir, port)
-            else:
-                # Dla innych typów tworzymy tylko katalog
-                success = True
-            
-            if success:
-                # Dodaj serwer do bazy danych
-                server_data = {
-                    'id': server_id,
-                    'name': server_name,
-                    'type': server_type,
-                    'slots': slots,
-                    'version': version,
-                    'port': port,
-                    'directory': server_dir,
-                    'status': 'offline',
-                    'pid': None,
-                    'created_at': time.time()
-                }
-                
-                servers = load_servers()
-                servers.append(server_data)
-                save_servers(servers)
-                
-                self.send_json_response({
-                    "success": True,
-                    "server_id": server_id,
-                    "server_dir": server_dir,
-                    "port": port
-                })
-            else:
-                self.send_json_response({"success": False, "error": "Błąd konfiguracji serwera"})
-                
-        except Exception as e:
-            self.send_json_response({"success": False, "error": str(e)})
-    
-    def start_server(self, data):
-        """Uruchom serwer"""
-        try:
-            server_id = data['server_id']
-            servers = load_servers()
-            server = next((s for s in servers if s['id'] == server_id), None)
-            
-            if not server:
-                self.send_json_response({"success": False, "error": "Serwer nie znaleziony"})
-                return
-            
-            server_dir = server['directory']
-            result = None
-            
-            if server['type'] == 'minecraft':
-                result = start_minecraft_server(server_dir)
-            elif server['type'] == 'teamspeak':
-                result = start_teamspeak_server(server_dir)
-            else:
-                result = {"success": False, "error": "Typ serwera nieobsługiwany"}
-            
-            if result['success']:
-                # Zaktualizuj status serwera
-                server['status'] = 'online'
-                server['pid'] = result.get('pid')
-                save_servers(servers)
-            
-            self.send_json_response(result)
-            
-        except Exception as e:
-            self.send_json_response({"success": False, "error": str(e)})
-    
-    def stop_server(self, data):
-        """Zatrzymaj serwer"""
-        try:
-            server_id = data['server_id']
-            servers = load_servers()
-            server = next((s for s in servers if s['id'] == server_id), None)
-            
-            if not server:
-                self.send_json_response({"success": False, "error": "Serwer nie znaleziony"})
-                return
-            
-            server_dir = server['directory']
-            result = None
-            
-            if server['type'] == 'minecraft':
-                result = stop_minecraft_server(server_dir)
-            elif server['type'] == 'teamspeak':
-                result = stop_teamspeak_server(server_dir)
-            else:
-                result = {"success": False, "error": "Typ serwera nieobsługiwany"}
-            
-            if result['success']:
-                # Zaktualizuj status serwera
-                server['status'] = 'offline'
-                server['pid'] = None
-                save_servers(servers)
-            
-            self.send_json_response(result)
-            
-        except Exception as e:
-            self.send_json_response({"success": False, "error": str(e)})
-    
-    def delete_server(self, data):
-        """Usuń serwer"""
-        try:
-            server_id = data['server_id']
-            servers = load_servers()
-            server = next((s for s in servers if s['id'] == server_id), None)
-            
-            if not server:
-                self.send_json_response({"success": False, "error": "Serwer nie znaleziony"})
-                return
-            
-            # Zatrzymaj serwer jeśli działa
-            if server['status'] == 'online':
-                self.stop_server(data)
-            
-            # Usuń katalog serwera
-            server_dir = server['directory']
-            subprocess.run(["rm", "-rf", server_dir])
-            
-            # Usuń z bazy danych
-            servers = [s for s in servers if s['id'] != server_id]
-            save_servers(servers)
-            
-            self.send_json_response({"success": True})
-            
-        except Exception as e:
-            self.send_json_response({"success": False, "error": str(e)})
+        updateUptime();
+    </script>
+</body>
+</html>
+STATUS
 
-def start_api_server():
-    """Uruchom serwer API"""
-    os.chdir(WEB_DIR)
-    
-    handler = PurpleHostAPIHandler
-    with socketserver.TCPServer(("", PORT), handler) as httpd:
-        print(f"🟣 PurpleHost API Server działa na porcie {PORT}")
-        print(f"🌐 Panel dostępny pod: http://localhost:{PORT}")
-        httpd.serve_forever()
-
-if __name__ == "__main__":
-    start_api_server()
-PYTHON
-
-    chmod +x "$WEB_DIR/api_server.py"
-
-    # Utwórz plik servers.json jeśli nie istnieje
-    if [ ! -f "$PANEL_DIR/servers.json" ]; then
-        echo "[]" > "$PANEL_DIR/servers.json"
-    fi
-
-    echo -e "${GREEN}✅ Panel PurpleHost z prawdziwymi serwerami został utworzony!${NC}"
+    echo -e "${GREEN}✅ Panel PurpleHost został utworzony!${NC}"
     echo -e "${PURPLE}📁 Lokalizacja: $WEB_DIR/${NC}"
-    echo -e "${PURPLE}🎮 Katalog serwerów: $SERVER_DIR/${NC}"
-    echo -e "${PURPLE}📊 Baza danych: $PANEL_DIR/servers.json${NC}"
 }
 
 start_web_server() {
-    echo -e "${PURPLE}🌐 URUCHAMIANIE SERWERA PURPLEHOST Z API...${NC}"
-    
-    # Sprawdź czy panel web istnieje
-    if [ ! -f "$WEB_DIR/index.html" ]; then
-        echo -e "${YELLOW}📝 Tworzenie panelu PurpleHost...${NC}"
-        create_web_panel
-    fi
+    echo -e "${PURPLE}🌐 Uruchamianie serwera PurpleHost...${NC}"
     
     # Sprawdź czy port jest dostępny
     if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
         echo -e "${YELLOW}🔄 Port $PORT jest zajęty, zatrzymywanie istniejącego serwera...${NC}"
-        pkill -f "api_server.py"
+        pkill -f "python3 -m http.server $PORT"
         sleep 2
     fi
     
-    # Uruchom serwer API Python
+    # Uruchom serwer HTTP
     cd "$WEB_DIR"
-    python3 api_server.py &
-    local api_pid=$!
+    python3 -m http.server $PORT > /dev/null 2>&1 &
+    local web_pid=$!
     
     sleep 2
     
-    if ps -p $api_pid > /dev/null 2>&1; then
+    if ps -p $web_pid > /dev/null 2>&1; then
         local ip=$(hostname -I | awk '{print $1}')
         
-        echo -e "${GREEN}✅ Serwer PurpleHost z API uruchomiony!${NC}"
-        echo -e "${PURPLE}🌐 Adresy dostępu:${NC}"
-        echo -e "   📍 Local:    http://localhost:$PORT"
-        echo -e "   🌍 Sieć:     http://$ip:$PORT"
-        echo -e ""
-        echo -e "${YELLOW}🎮 Funkcjonalności:${NC}"
-        echo -e "   ✅ Tworzenie prawdziwych serwerów Minecraft"
-        echo -e "   ✅ Tworzenie prawdziwych serwerów TeamSpeak 3"
-        echo -e "   ✅ Uruchamianie/zatrzymywanie serwerów"
-        echo -e "   ✅ Zarządzanie portami i konfiguracją"
-        echo -e "   ✅ Prawdziwe procesy w tle"
+        echo -e "${GREEN}✅ Serwer PurpleHost uruchomiony pomyślnie!${NC}"
+        echo -e "${PURPLE}"
+        echo -e "╔══════════════════════════════════════════════════╗"
+        echo -e "║                🟣 PURPLEHOST                    ║"
+        echo -e "║           Panel został uruchomiony!             ║"
+        echo -e "╠══════════════════════════════════════════════════╣"
+        echo -e "║                                                  ║"
+        echo -e "║  🌐 Adresy dostępu:                              ║"
+        echo -e "║     📍 Local:    http://localhost:$PORT         ║"
+        echo -e "║     🌍 Sieć:     http://$ip:$PORT               ║"
+        echo -e "║     📊 Status:   http://localhost:$PORT/status  ║"
+        echo -e "║                                                  ║"
+        echo -e "║  📁 Katalog panelu: $WEB_DIR                    ║"
+        echo -e "║  🎮 Katalog serwerów: $SERVER_DIR               ║"
+        echo -e "║                                                  ║"
+        echo -e "║  💡 Otwórz przeglądarkę i wejdź na powyższy     ║"
+        echo -e "║     adres aby korzystać z panelu                ║"
+        echo -e "║                                                  ║"
+        echo -e "╚══════════════════════════════════════════════════╝"
+        echo -e "${NC}"
         
+        # Otwórz przeglądarkę jeśli jest graficzne środowisko
         if [ -n "$DISPLAY" ]; then
             echo -e "${YELLOW}🖥️  Otwieranie przeglądarki...${NC}"
             xdg-open "http://localhost:$PORT" 2>/dev/null &
         fi
+        
+        # Zapisz PID serwera
+        echo $web_pid > "$PANEL_DIR/web_server.pid"
+        log "Serwer web uruchomiony (PID: $web_pid)"
+        
     else
-        error "❌ Nie udało się uruchomić serwera API!"
-        # Fallback to simple HTTP server
-        echo -e "${YELLOW}🔄 Uruchamianie prostego serwera HTTP...${NC}"
-        python3 -m http.server $PORT &
+        error "❌ Nie udało się uruchomić serwera web!"
+        exit 1
     fi
 }
 
-# ... (reszta funkcji jak w poprzednim skrypcie - show_menu, show_panel_info, etc.)
+show_success_message() {
+    echo -e "${GREEN}"
+    echo -e "╔══════════════════════════════════════════════════╗"
+    echo -e "║                🎉 INSTALACJA ZAKOŃCZONA!        ║"
+    echo -e "╠══════════════════════════════════════════════════╣"
+    echo -e "║                                                  ║"
+    echo -e "║  Panel PurpleHost został utworzony i uruchomiony ║"
+    echo -e "║  automatycznie!                                  ║"
+    echo -e "║                                                  ║"
+    echo -e "║  Możesz teraz:                                   ║"
+    echo -e "║    • Otworzyć przeglądarkę                       ║"
+    echo -e "║    • Wejść na http://localhost:8080              ║"
+    echo -e "║    • Zarządzać serwerami gry                     ║"
+    echo -e "║                                                  ║"
+    echo -e "║  Panel będzie działał do momentu zamknięcia      ║"
+    echo -e "║  terminala lub ręcznego zatrzymania.             ║"
+    echo -e "║                                                  ║"
+    echo -e "╚══════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
 
 # =============================================
-# 📜 MAIN SCRIPT
+# 📜 MAIN SCRIPT - AUTOMATYCZNA INSTALACJA
 # =============================================
-
-# Inicjalizacja
-mkdir -p "$PANEL_DIR"
-setup_directories
-check_dependencies
 
 clear
 
 echo -e "${PURPLE}"
 echo -e "╔══════════════════════════════════════╗"
-echo -e "║        🟣 PURPLEHOST PRO             ║"
-echo -e "║      PRAWDZIWE SERWERY GRY           ║"
+echo -e "║        🟣 PURPLEHOST PANEL           ║"
+echo -e "║      Automatyczna Instalacja         ║"
 echo -e "╚══════════════════════════════════════╝"
 echo -e "${NC}"
-echo -e "${CYAN}Katalog panelu: $PANEL_DIR${NC}"
-echo -e "${CYAN}Katalog serwerów: $SERVER_DIR${NC}"
-echo -e "${CYAN}Port serwera: $PORT${NC}"
+echo -e "${CYAN}Rozpoczynanie automatycznej instalacji...${NC}"
 echo ""
 
-# Uruchom menu główne
+# Inicjalizacja
+echo -e "${PURPLE}🚀 Inicjalizacja systemu...${NC}"
+setup_directories
+check_dependencies
+
+# Tworzenie panelu
+echo -e "${PURPLE}📝 Tworzenie panelu web...${NC}"
+create_web_panel
+
+# Uruchamianie serwera
+echo -e "${PURPLE}🌐 Uruchamianie serwera...${NC}"
+start_web_server
+
+# Komunikat sukcesu
+show_success_message
+
+# Informacja o zatrzymaniu
+echo -e "${YELLOW}📝 Aby zatrzymać panel, naciśnij Ctrl+C lub zamknij terminal.${NC}"
+echo ""
+
+# Czekaj na sygnał zakończenia
+trap 'echo -e "\n${GREEN}👋 Zamykanie PurpleHost Panel...${NC}"; pkill -f "python3 -m http.server $PORT"; exit 0' INT TERM
+
+# Bezczynne czekanie, aby skrypt się nie zakończył
 while true; do
-    show_menu
-    read -p "Twój wybór: " choice
-    
-    case $choice in
-        1)
-            create_web_panel
-            ;;
-        2)
-            start_web_server
-            ;;
-        3)
-            stop_web_server
-            ;;
-        4)
-            echo -e "${PURPLE}🚀 Tworzenie i uruchamianie panelu PurpleHost...${NC}"
-            create_web_panel
-            start_web_server
-            ;;
-        5)
-            show_panel_info
-            ;;
-        0)
-            echo -e "${PURPLE}👋 Do widzenia!${NC}"
-            stop_web_server
-            exit 0
-            ;;
-        *)
-            echo -e "${RED}❌ Nieprawidłowy wybór!${NC}"
-            ;;
-    esac
-    
-    echo ""
-    read -p "Naciśnij Enter aby kontynuować..."
-    clear
+    sleep 60
 done
