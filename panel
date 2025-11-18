@@ -147,7 +147,7 @@ stop_web_server() {
 
 create_web_interface() {
     # Strona główna Admin
-    cat > "$WEB_DIR/index.html" << 'EOF'
+    cat > "$WEB_DIR/index.html" << 'HTML_EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -439,11 +439,11 @@ create_web_interface() {
     </script>
 </body>
 </html>
-EOF
+HTML_EOF
 
     # Panel klienta
     mkdir -p "$WEB_DIR/client"
-    cat > "$WEB_DIR/client/index.html" << 'EOF'
+    cat > "$WEB_DIR/client/index.html" << 'CLIENT_EOF'
 <!DOCTYPE html>
 <html lang="pl">
 <head>
@@ -552,7 +552,7 @@ EOF
     </script>
 </body>
 </html>
-EOF
+CLIENT_EOF
 
     echo -e "${GREEN}✅ Interfejs web utworzony${NC}"
 }
@@ -570,17 +570,17 @@ quick_initialize() {
     
     # Utwórz podstawowego użytkownika
     if [ ! -f "$USERS_DIR/testuser.conf" ]; then
-        cat > "$USERS_DIR/testuser.conf" << EOF
+        cat > "$USERS_DIR/testuser.conf" << USER_EOF
 USERNAME="testuser"
 USER_EMAIL="test@example.com"
 USER_PASSWORD="test123"
 USER_CREATED="$(date '+%Y-%m-%d %H:%M:%S')"
-EOF
+USER_EOF
         echo -e "${GREEN}✅ Utworzono użytkownika testowego${NC}"
     fi
     
     # Utwórz przykładowe serwery
-    cat > "$SERVERS_DIR/minecraft.json" << EOF
+    cat > "$SERVERS_DIR/minecraft.json" << MC_EOF
 {
     "name": "Minecraft Server",
     "type": "minecraft",
@@ -589,9 +589,9 @@ EOF
     "status": "running",
     "owner": "testuser"
 }
-EOF
+MC_EOF
 
-    cat > "$SERVERS_DIR/python.json" << EOF
+    cat > "$SERVERS_DIR/python.json" << PY_EOF
 {
     "name": "Python API", 
     "type": "python",
@@ -600,7 +600,7 @@ EOF
     "status": "running",
     "owner": "testuser"
 }
-EOF
+PY_EOF
 
     # Utwórz interfejs web
     echo -e "${YELLOW}🌐 Tworzenie interfejsu web...${NC}"
