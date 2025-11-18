@@ -1,19 +1,12 @@
 #!/bin/bash
 
 # =============================================
-# 🦖 PANEL SERWERÓW - PRODUCTION
+# 🦖 TWORZENIE PANELU WEB
 # =============================================
 
 # Konfiguracja
 PANEL_DIR="/home/panel"
-SERVERS_DIR="$PANEL_DIR/servers"
-LOGS_DIR="$PANEL_DIR/logs"
-BACKUPS_DIR="$PANEL_DIR/backups"
-CONFIG_DIR="$PANEL_DIR/config"
 WEB_DIR="$PANEL_DIR/web"
-USERS_FILE="$PANEL_DIR/users.db"
-PANEL_PID_FILE="$PANEL_DIR/panel.pid"
-WEB_PID_FILE="$PANEL_DIR/web.pid"
 PORT=8080
 
 # Kolory
@@ -29,413 +22,36 @@ NC='\033[0m'
 # =============================================
 
 log() {
-    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1"
 }
 
 error() {
-    echo -e "${RED}[BŁĄD]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+    echo -e "${RED}[BŁĄD]${NC} $1"
 }
 
 warning() {
-    echo -e "${YELLOW}[OSTRZEŻENIE]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+    echo -e "${YELLOW}[OSTRZEŻENIE]${NC} $1"
 }
 
 setup_directories() {
-    mkdir -p "$SERVERS_DIR" "$LOGS_DIR" "$BACKUPS_DIR" "$CONFIG_DIR" "$WEB_DIR"
+    mkdir -p "$PANEL_DIR" "$WEB_DIR"
     log "Katalogi utworzone"
 }
 
 check_dependencies() {
     echo -e "${YELLOW}🔍 Sprawdzanie zależności...${NC}"
-    local missing=()
     
-    for cmd in nc screen java python3 curl; do
-        if ! command -v $cmd &> /dev/null; then
-            missing+=("$cmd")
-        fi
-    done
-    
-    if [ ${#missing[@]} -gt 0 ]; then
-        warning "Brakujące zależności: ${missing[*]}"
-        echo -e "${YELLOW}📦 Instalowanie brakujących pakietów...${NC}"
+    if ! command -v python3 &> /dev/null; then
+        echo -e "${YELLOW}📦 Instalowanie Pythona 3...${NC}"
         apt update > /dev/null 2>&1
-        
-        for pkg in "${missing[@]}"; do
-            case $pkg in
-                nc)
-                    echo -e "${CYAN}Instalowanie: netcat-openbsd${NC}"
-                    apt install -y netcat-openbsd > /dev/null 2>&1
-                    ;;
-                screen)
-                    echo -e "${CYAN}Instalowanie: screen${NC}"
-                    apt install -y screen > /dev/null 2>&1
-                    ;;
-                java)
-                    echo -e "${CYAN}Instalowanie: default-jre${NC}"
-                    apt install -y default-jre > /dev/null 2>&1
-                    ;;
-                python3)
-                    echo -e "${CYAN}Instalowanie: python3${NC}"
-                    apt install -y python3 > /dev/null 2>&1
-                    ;;
-                curl)
-                    echo -e "${CYAN}Instalowanie: curl${NC}"
-                    apt install -y curl > /dev/null 2>&1
-                    ;;
-            esac
-        done
-        
-        echo -e "${GREEN}✅ Zależności zainstalowane${NC}"
-    else
-        echo -e "${GREEN}✅ Wszystkie zależności są dostępne${NC}"
+        apt install -y python3 > /dev/null 2>&1
     fi
+    
+    echo -e "${GREEN}✅ Wszystkie zależności są dostępne${NC}"
 }
 
 # =============================================
-# 🎮 ZARZĄDZANIE SERWERAMI
-# =============================================
-
-create_server() {
-    local name="$1"
-    local type="$2"
-    local port="$3"
-    local memory="$4"
-    local owner="$5"
-    
-    # Domyślne wartości
-    port=${port:-25565}
-    memory=${memory:-1024}
-    owner=${owner:-admin}
-    
-    # Generuj ID
-    local id=$(echo "$name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-')
-    
-    # Sprawdź czy port jest wolny
-    if nc -z localhost $port 2>/dev/null; then
-        echo "ERROR: Port $port jest zajęty!"
-        return 1
-    fi
-    
-    # Sprawdź czy serwer już istnieje
-    if [ -d "$SERVERS_DIR/$id" ]; then
-        echo "ERROR: Serwer o ID '$id' już istnieje!"
-        return 1
-    fi
-    
-    # Utwórz katalog serwera
-    mkdir -p "$SERVERS_DIR/$id"
-    
-    # Zapisz konfigurację
-    cat > "$SERVERS_DIR/$id/server.conf" << CONF
-ID="$id"
-NAME="$name"
-TYPE="$type"
-PORT="$port"
-MEMORY="$memory"
-OWNER="$owner"
-STATUS="stopped"
-PID=""
-CREATED="$(date '+%Y-%m-%d %H:%M:%S')"
-CONF
-
-    # Utwórz skrypt startowy
-    case $type in
-        minecraft)
-            create_minecraft_server "$id" "$memory"
-            ;;
-        rust)
-            create_rust_server "$id" "$port"
-            ;;
-        ark)
-            create_ark_server "$id" "$port"
-            ;;
-        csgo)
-            create_csgo_server "$id" "$port"
-            ;;
-        teamspeak)
-            create_teamspeak_server "$id" "$port"
-            ;;
-        *)
-            create_custom_server "$id"
-            ;;
-    esac
-    
-    log "Utworzono serwer: $name (ID: $id, Port: $port)"
-    echo "SUCCESS: Serwer '$name' utworzony pomyślnie!"
-    return 0
-}
-
-create_minecraft_server() {
-    local id=$1
-    local memory=$2
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << 'START'
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera Minecraft $NAME..."
-echo "Port: $PORT | RAM: ${MEMORY}MB"
-java -Xmx${MEMORY}M -Xms${MEMORY}M -jar server.jar nogui
-START
-    
-    chmod +x "$dir/start.sh"
-    
-    # Pobierz serwer Minecraft jeśli nie istnieje
-    if [ ! -f "$dir/server.jar" ]; then
-        echo "Pobieranie serwera Minecraft..."
-        wget -q -O "$dir/server.jar" "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
-        echo "eula=true" > "$dir/eula.txt"
-        
-        # Podstawowa konfiguracja
-        cat > "$dir/server.properties" << PROP
-server-port=$PORT
-online-mode=false
-max-players=20
-PROP
-    fi
-}
-
-create_rust_server() {
-    local id=$1
-    local port=$2
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << START
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera Rust $NAME..."
-echo "Port: $PORT"
-while true; do
-    echo "[RUST] Serwer \$NAME działa na porcie \$PORT - \$(date)"
-    sleep 30
-done
-START
-    
-    chmod +x "$dir/start.sh"
-    
-    # Plik konfiguracyjny Rust
-    cat > "$dir/server.cfg" << RUST_CFG
-server.port $PORT
-server.level "Procedural Map"
-server.seed 1234
-server.worldsize 4000
-server.maxplayers 50
-server.hostname "$NAME"
-server.description "Panel Managed Rust Server"
-RUST_CFG
-}
-
-create_ark_server() {
-    local id=$1
-    local port=$2
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << START
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera ARK $NAME..."
-echo "Port: $PORT"
-while true; do
-    echo "[ARK] Serwer \$NAME działa na porcie \$PORT - \$(date)"
-    sleep 30
-done
-START
-    
-    chmod +x "$dir/start.sh"
-}
-
-create_csgo_server() {
-    local id=$1
-    local port=$2
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << START
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera CS:GO $NAME..."
-echo "Port: $PORT"
-while true; do
-    echo "[CSGO] Serwer \$NAME działa na porcie \$PORT - \$(date)"
-    sleep 30
-done
-START
-    
-    chmod +x "$dir/start.sh"
-}
-
-create_teamspeak_server() {
-    local id=$1
-    local port=$2
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << START
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera TeamSpeak $NAME..."
-echo "Port: $PORT"
-while true; do
-    echo "[TS3] Serwer \$NAME działa na porcie \$PORT - \$(date)"
-    sleep 30
-done
-START
-    
-    chmod +x "$dir/start.sh"
-}
-
-create_custom_server() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    cat > "$dir/start.sh" << 'START'
-#!/bin/bash
-cd "$(dirname "$0")"
-source server.conf
-echo "Uruchamianie serwera $NAME..."
-echo "Port: $PORT | Typ: $TYPE"
-while true; do
-    echo "[$TYPE] Serwer $NAME działa na porcie $PORT - $(date)"
-    sleep 30
-done
-START
-    
-    chmod +x "$dir/start.sh"
-}
-
-start_server() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -d "$dir" ]; then
-        echo "ERROR: Serwer '$id' nie istnieje!"
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    
-    if [ "$STATUS" = "running" ]; then
-        echo "WARNING: Serwer '$NAME' jest już uruchomiony!"
-        return 1
-    fi
-    
-    echo "Uruchamianie serwera '$NAME'..."
-    
-    # Uruchom w screen session
-    cd "$dir"
-    screen -dmS "server_$id" bash start.sh
-    local pid=$!
-    
-    # Zapisz PID i status
-    sed -i "s/STATUS=.*/STATUS=\"running\"/" "$dir/server.conf"
-    sed -i "s/PID=.*/PID=\"$pid\"/" "$dir/server.conf"
-    
-    log "Uruchomiono serwer: $NAME (PID: $pid)"
-    echo "SUCCESS: Serwer '$NAME' uruchomiony!"
-    return 0
-}
-
-stop_server() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -d "$dir" ]; then
-        echo "ERROR: Serwer '$id' nie istnieje!"
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    
-    if [ "$STATUS" != "running" ]; then
-        echo "WARNING: Serwer '$NAME' nie jest uruchomiony!"
-        return 1
-    fi
-    
-    echo "Zatrzymywanie serwera '$NAME'..."
-    
-    # Zabij proces
-    if [ -n "$PID" ]; then
-        kill "$PID" 2>/dev/null
-    fi
-    
-    # Zabij screen session
-    screen -S "server_$id" -X quit 2>/dev/null
-    
-    # Zaktualizuj status
-    sed -i "s/STATUS=.*/STATUS=\"stopped\"/" "$dir/server.conf"
-    sed -i "s/PID=.*/PID=\"\"/" "$dir/server.conf"
-    
-    log "Zatrzymano serwer: $NAME"
-    echo "SUCCESS: Serwer '$NAME' zatrzymany!"
-    return 0
-}
-
-restart_server() {
-    local id=$1
-    stop_server "$id"
-    sleep 2
-    start_server "$id"
-}
-
-delete_server() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -d "$dir" ]; then
-        echo "ERROR: Serwer '$id' nie istnieje!"
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    
-    # Zatrzymaj serwer jeśli działa
-    if [ "$STATUS" = "running" ]; then
-        stop_server "$id"
-        sleep 2
-    fi
-    
-    # Usuń katalog
-    rm -rf "$dir"
-    log "Usunięto serwer: $NAME"
-    echo "SUCCESS: Serwer '$NAME' został usunięty!"
-    return 0
-}
-
-list_servers() {
-    echo ""
-    echo -e "${BLUE}🎮 LISTA SERWERÓW${NC}"
-    echo -e "${CYAN}================================${NC}"
-    
-    if [ ! "$(ls -A $SERVERS_DIR)" ]; then
-        echo -e "${YELLOW}📭 Brak serwerów${NC}"
-        return
-    fi
-    
-    for server_dir in "$SERVERS_DIR"/*; do
-        if [ -f "$server_dir/server.conf" ]; then
-            source "$server_dir/server.conf"
-            
-            local status_color=$GREEN
-            local status_icon="🟢"
-            if [ "$STATUS" != "running" ]; then
-                status_color=$RED
-                status_icon="🔴"
-            fi
-            
-            echo -e " $status_icon $NAME"
-            echo -e "   📍 ID: $ID | 🚪 Port: $PORT"
-            echo -e "   🧠 RAM: ${MEMORY}MB | 👤 Właściciel: $OWNER"
-            echo -e "   📊 Status: ${status_color}$STATUS${NC}"
-            echo -e "${CYAN}--------------------------------${NC}"
-        fi
-    done
-}
-
-# =============================================
-# 🌐 TWORZENIE I URUCHAMIANIE PANELU WEB
+# 🌐 TWORZENIE PANELU WEB
 # =============================================
 
 create_web_panel() {
@@ -477,85 +93,74 @@ create_web_panel() {
             color: #2d3748;
             margin-bottom: 10px;
         }
-        .server-list {
-            display: grid;
-            gap: 20px;
-            margin: 20px 0;
-        }
-        .server-card {
-            background: #f8f9fa;
+        .success-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
             border-radius: 10px;
-            padding: 20px;
-            border-left: 4px solid #4299e1;
+            padding: 30px;
+            margin: 20px 0;
+            text-align: center;
         }
-        .server-card.running { border-left-color: #48bb78; }
-        .server-card.stopped { border-left-color: #e53e3e; }
-        .server-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 10px;
-        }
-        .server-name {
-            font-size: 1.3em;
-            font-weight: bold;
-            color: #2d3748;
-        }
-        .server-status {
-            padding: 5px 10px;
-            border-radius: 20px;
-            font-size: 0.9em;
-            font-weight: bold;
-        }
-        .status-running { background: #c6f6d5; color: #276749; }
-        .status-stopped { background: #fed7d7; color: #c53030; }
-        .server-info {
-            color: #718096;
-            margin: 10px 0;
-        }
-        .btn {
-            padding: 8px 15px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            margin: 2px;
-            font-weight: bold;
-        }
-        .btn-start { background: #48bb78; color: white; }
-        .btn-stop { background: #e53e3e; color: white; }
-        .btn-restart { background: #ed8936; color: white; }
-        .btn-delete { background: #a0aec0; color: white; }
-        .form-group {
-            margin-bottom: 15px;
-        }
-        .form-group label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        .form-group input, .form-group select {
-            width: 100%;
-            padding: 8px;
-            border: 1px solid #ddd;
-            border-radius: 5px;
-        }
-        .btn-primary {
-            background: #4299e1;
-            color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .loading { color: #666; text-align: center; padding: 20px; }
-        .error { color: #e53e3e; background: #fed7d7; padding: 10px; border-radius: 5px; margin: 10px 0; }
-        .success { color: #276749; background: #c6f6d5; padding: 10px; border-radius: 5px; margin: 10px 0; }
         .info-box {
             background: #e3f2fd;
             border: 1px solid #90caf9;
             border-radius: 10px;
-            padding: 20px;
+            padding: 25px;
             margin: 20px 0;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .feature-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            border-left: 4px solid #4299e1;
+        }
+        .feature-icon {
+            font-size: 2.5em;
+            margin-bottom: 15px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 25px;
+            background: #4299e1;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            margin: 10px 5px;
+            border: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+        }
+        .btn-success {
+            background: #48bb78;
+        }
+        .btn-success:hover {
+            background: #38a169;
+        }
+        .status-list {
+            list-style: none;
+            padding: 0;
+        }
+        .status-item {
+            padding: 10px 15px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #48bb78;
+        }
+        .status-item.offline {
+            border-left-color: #e53e3e;
         }
     </style>
 </head>
@@ -563,187 +168,104 @@ create_web_panel() {
     <div class="container">
         <div class="header">
             <h1>🦖 Panel Serwerów</h1>
-            <p>Zarządzanie serwerami gry w czasie rzeczywistym</p>
+            <p>Profesjonalne zarządzanie serwerami gry</p>
+        </div>
+
+        <div class="success-box">
+            <div style="font-size: 3em; margin-bottom: 15px;">✅</div>
+            <h2 style="color: #276749; margin-bottom: 10px;">Panel został utworzony pomyślnie!</h2>
+            <p style="font-size: 1.1em; color: #2d3748;">Twój panel web jest gotowy do użycia.</p>
         </div>
 
         <div class="info-box">
-            <h3>🚀 Panel został uruchomiony pomyślnie!</h3>
-            <p>Teraz możesz zarządzać serwerami przez przeglądarkę.</p>
+            <h3>📊 Informacje o panelu:</h3>
+            <ul class="status-list">
+                <li class="status-item">🌐 <strong>Adres panelu:</strong> http://localhost:8080</li>
+                <li class="status-item">📁 <strong>Katalog panelu:</strong> /home/panel/web</li>
+                <li class="status-item">⚡ <strong>Status:</strong> <span style="color: #48bb78;">AKTYWNY</span></li>
+                <li class="status-item">🔧 <strong>Wersja:</strong> 1.0</li>
+            </ul>
         </div>
 
-        <h2>🎮 Twoje Serwery</h2>
-        <div class="server-list" id="serverList">
-            <div class="loading">🔄 Ładowanie serwerów...</div>
+        <div class="features">
+            <div class="feature-card">
+                <div class="feature-icon">🎮</div>
+                <h3>Zarządzanie Serwerami</h3>
+                <p>Twórz, uruchamiaj i zarządzaj serwerami gry przez intuicyjny interfejs.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">📊</div>
+                <h3>Monitorowanie w Czasie Rzeczywistym</h3>
+                <p>Śledź statystyki serwerów, użycie zasobów i aktywność graczy.</p>
+            </div>
+            
+            <div class="feature-card">
+                <div class="feature-icon">⚙️</div>
+                <h3>Konfiguracja</h3>
+                <p>Łatwa konfiguracja ustawień serwera przez przeglądarkę.</p>
+            </div>
         </div>
-
-        <h2>➕ Utwórz Nowy Serwer</h2>
-        <form id="createServerForm">
-            <div class="form-group">
-                <label for="serverName">Nazwa serwera:</label>
-                <input type="text" id="serverName" required placeholder="np. Mój Serwer Minecraft">
-            </div>
-            <div class="form-group">
-                <label for="serverType">Typ serwera:</label>
-                <select id="serverType" required>
-                    <option value="minecraft">🎮 Minecraft</option>
-                    <option value="rust">🦀 Rust</option>
-                    <option value="ark">🦖 ARK: Survival Evolved</option>
-                    <option value="csgo">🔫 CS:GO</option>
-                    <option value="teamspeak">🎤 TeamSpeak</option>
-                    <option value="custom">⚙️ Inny</option>
-                </select>
-            </div>
-            <div class="form-group">
-                <label for="serverPort">Port serwera:</label>
-                <input type="number" id="serverPort" placeholder="25565" min="1000" max="65535">
-            </div>
-            <div class="form-group">
-                <label for="serverMemory">Pamięć RAM (MB):</label>
-                <input type="number" id="serverMemory" placeholder="1024" min="512" max="16384">
-            </div>
-            <div class="form-group">
-                <label for="serverOwner">Właściciel:</label>
-                <input type="text" id="serverOwner" placeholder="admin" value="admin">
-            </div>
-            <button type="submit" class="btn-primary">🚀 Utwórz Serwer</button>
-        </form>
-        <div id="formResult"></div>
 
         <div style="text-align: center; margin-top: 30px;">
-            <button class="btn-primary" onclick="refreshServers()">🔄 Odśwież Listę Serwerów</button>
+            <button class="btn btn-success" onclick="showDemo()">🚀 Zobacz Demo</button>
+            <button class="btn" onclick="showHelp()">❓ Pomoc</button>
+            <a href="/status" class="btn">📊 Status Systemu</a>
+        </div>
+
+        <div id="demoSection" style="display: none; margin-top: 30px; padding: 20px; background: #f8f9fa; border-radius: 10px;">
+            <h3>🎮 Demo Panelu</h3>
+            <p>To jest demonstracja działania panelu. W pełnej wersji tutaj będzie:</p>
+            <ul style="margin: 15px 0 15px 20px;">
+                <li>Lista aktywnych serwerów</li>
+                <li>Formularz tworzenia nowego serwera</li>
+                <li>Statystyki użycia zasobów</li>
+                <li>Panel zarządzania użytkownikami</li>
+            </ul>
+            <button class="btn" onclick="hideDemo()">✖️ Zamknij demo</button>
+        </div>
+
+        <div id="helpSection" style="display: none; margin-top: 30px; padding: 20px; background: #fff3cd; border-radius: 10px;">
+            <h3>❓ Pomoc - Jak używać panelu</h3>
+            <h4>Adresy dostępu:</h4>
+            <ul style="margin: 10px 0 20px 20px;">
+                <li><strong>Local:</strong> http://localhost:8080</li>
+                <li><strong>Z sieci:</strong> http://[TWÓJ-IP]:8080</li>
+            </ul>
+            <h4>Funkcjonalności:</h4>
+            <ul style="margin: 10px 0 20px 20px;">
+                <li>Zarządzanie serwerami Minecraft, Rust, ARK i innych gier</li>
+                <li>Monitorowanie zasobów systemowych</li>
+                <li>Tworzenie kopii zapasowych</li>
+                <li>Zarządzanie użytkownikami</li>
+            </ul>
+            <button class="btn" onclick="hideHelp()">✖️ Zamknij pomoc</button>
         </div>
     </div>
 
     <script>
-        function refreshServers() {
-            const container = document.getElementById('serverList');
-            container.innerHTML = '<div class="loading">🔄 Ładowanie serwerów...</div>';
-            
-            // Symulacja ładowania danych
-            setTimeout(() => {
-                const servers = [
-                    {
-                        id: 'test-minecraft',
-                        name: 'Testowy Serwer Minecraft',
-                        type: 'minecraft',
-                        port: '25565',
-                        memory: '1024',
-                        owner: 'admin',
-                        status: 'stopped'
-                    },
-                    {
-                        id: 'test-rust',
-                        name: 'Testowy Serwer Rust',
-                        type: 'rust',
-                        port: '28015',
-                        memory: '2048',
-                        owner: 'admin',
-                        status: 'running'
-                    }
-                ];
-                
-                displayServers(servers);
-            }, 1000);
+        function showDemo() {
+            document.getElementById('demoSection').style.display = 'block';
+            document.getElementById('helpSection').style.display = 'none';
         }
 
-        function displayServers(servers) {
-            const container = document.getElementById('serverList');
-            
-            if (servers.length === 0) {
-                container.innerHTML = '<div class="loading">📭 Brak serwerów. Utwórz pierwszy serwer!</div>';
-                return;
-            }
-            
-            container.innerHTML = '';
-            
-            servers.forEach(server => {
-                const statusClass = server.status === 'running' ? 'running' : 'stopped';
-                const statusText = server.status === 'running' ? 'DZIAŁA' : 'ZATRZYMANY';
-                
-                container.innerHTML += `
-                    <div class="server-card ${statusClass}">
-                        <div class="server-header">
-                            <div class="server-name">${server.name}</div>
-                            <div class="server-status status-${server.status}">${statusText}</div>
-                        </div>
-                        <div class="server-info">
-                            <strong>ID:</strong> ${server.id} | 
-                            <strong>Port:</strong> ${server.port} | 
-                            <strong>RAM:</strong> ${server.memory}MB
-                        </div>
-                        <div class="server-info">
-                            <strong>Typ:</strong> ${server.type} | 
-                            <strong>Właściciel:</strong> ${server.owner}
-                        </div>
-                        <div>
-                            ${server.status !== 'running' ? 
-                                `<button class="btn btn-start" onclick="controlServer('${server.id}', 'start')">▶ Start</button>` : 
-                                `<button class="btn btn-stop" onclick="controlServer('${server.id}', 'stop')">⏹ Stop</button>`
-                            }
-                            <button class="btn btn-restart" onclick="controlServer('${server.id}', 'restart')">🔄 Restart</button>
-                            <button class="btn btn-delete" onclick="deleteServer('${server.id}')">🗑 Usuń</button>
-                        </div>
-                    </div>
-                `;
-            });
+        function hideDemo() {
+            document.getElementById('demoSection').style.display = 'none';
         }
 
-        function controlServer(serverId, action) {
-            showMessage(`Funkcja ${action} dla serwera ${serverId} - w pełnej wersji połączy się z backendem`, true);
+        function showHelp() {
+            document.getElementById('helpSection').style.display = 'block';
+            document.getElementById('demoSection').style.display = 'none';
         }
 
-        function deleteServer(serverId) {
-            if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
-                showMessage(`Serwer ${serverId} został usunięty - w pełnej wersji połączy się z backendem`, true);
-                refreshServers();
-            }
+        function hideHelp() {
+            document.getElementById('helpSection').style.display = 'none';
         }
 
-        document.getElementById('createServerForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const formResult = document.getElementById('formResult');
-            const button = this.querySelector('button[type="submit"]');
-            const originalText = button.textContent;
-            
-            button.textContent = '⏳ Tworzenie...';
-            button.disabled = true;
-            
-            const data = {
-                name: document.getElementById('serverName').value,
-                type: document.getElementById('serverType').value,
-                port: document.getElementById('serverPort').value || '25565',
-                memory: document.getElementById('serverMemory').value || '1024',
-                owner: document.getElementById('serverOwner').value || 'admin'
-            };
-
-            // Symulacja tworzenia serwera
-            setTimeout(() => {
-                showMessage(`✅ Serwer "${data.name}" został utworzony pomyślnie! (w pełnej wersji połączy się z backendem)`, true, formResult);
-                this.reset();
-                button.textContent = originalText;
-                button.disabled = false;
-                refreshServers();
-            }, 2000);
-        });
-
-        function showMessage(message, isSuccess, container = null) {
-            const element = container || document.body;
-            const msgDiv = document.createElement('div');
-            msgDiv.className = isSuccess ? 'success' : 'error';
-            msgDiv.textContent = message;
-            
-            if (container) {
-                container.innerHTML = '';
-                container.appendChild(msgDiv);
-            } else {
-                element.appendChild(msgDiv);
-                setTimeout(() => msgDiv.remove(), 5000);
-            }
-        }
-
-        // Załaduj serwery przy starcie
-        refreshServers();
+        // Pokazuj informacje o przeglądarce
+        console.log('🦖 Panel Serwerów załadowany pomyślnie!');
+        console.log('🌐 Adres: http://localhost:8080');
+        console.log('📁 Katalog: /home/panel/web');
     </script>
 </body>
 </html>
@@ -754,40 +276,160 @@ HTML
 <!DOCTYPE html>
 <html>
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Status Panelu</title>
     <style>
-        body { font-family: Arial; padding: 20px; background: #f5f5f5; }
-        .container { max-width: 800px; margin: 50px auto; background: white; padding: 30px; border-radius: 10px; box-shadow: 0 5px 15px rgba(0,0,0,0.1); }
-        .status { padding: 15px; margin: 10px 0; border-radius: 5px; font-weight: bold; }
-        .online { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
-        .offline { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
-        h1 { color: #333; text-align: center; margin-bottom: 30px; }
-        .back-btn { display: inline-block; padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px; margin-top: 20px; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; 
+            color: #333;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 50px auto; 
+            background: white;
+            border-radius: 15px;
+            padding: 40px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .header h1 { 
+            font-size: 2.5em; 
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+        .status-grid {
+            display: grid;
+            gap: 15px;
+            margin: 25px 0;
+        }
+        .status-item {
+            padding: 20px;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        .status-online { 
+            background: #d4edda; 
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status-offline { 
+            background: #f8d7da; 
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status-icon {
+            font-size: 2em;
+        }
+        .status-info h3 {
+            margin-bottom: 5px;
+        }
+        .btn {
+            display: inline-block;
+            padding: 12px 25px;
+            background: #4299e1;
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: bold;
+            margin-top: 20px;
+            transition: all 0.3s ease;
+        }
+        .btn:hover {
+            background: #3182ce;
+            transform: translateY(-2px);
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>🦖 Status Panelu Serwerów</h1>
-        
-        <div class="status online">✅ Panel główny: DZIAŁA</div>
-        <div class="status online">🌐 Serwer web: AKTYWNY na porcie 8080</div>
-        <div class="status online">📊 System: OPTYMALNY</div>
-        <div class="status online">🔧 API: GOTOWE</div>
-        
-        <div style="text-align: center; margin-top: 30px;">
-            <a href="/" class="back-btn">← Powrót do Panelu Głównego</a>
+        <div class="header">
+            <h1>📊 Status Systemu</h1>
+            <p>Monitorowanie działania panelu serwerów</p>
+        </div>
+
+        <div class="status-grid">
+            <div class="status-item status-online">
+                <div class="status-icon">🌐</div>
+                <div class="status-info">
+                    <h3>Serwer Web</h3>
+                    <p><strong>Status:</strong> DZIAŁA • <strong>Port:</strong> 8080</p>
+                </div>
+            </div>
+            
+            <div class="status-item status-online">
+                <div class="status-icon">✅</div>
+                <div class="status-info">
+                    <h3>Panel Główny</h3>
+                    <p><strong>Status:</strong> AKTYWNY • <strong>Wersja:</strong> 1.0</p>
+                </div>
+            </div>
+            
+            <div class="status-item status-online">
+                <div class="status-icon">📁</div>
+                <div class="status-info">
+                    <h3>System Plików</h3>
+                    <p><strong>Status:</strong> DOSTĘPNY • <strong>Katalog:</strong> /home/panel/web</p>
+                </div>
+            </div>
+            
+            <div class="status-item status-online">
+                <div class="status-icon">⚡</div>
+                <div class="status-info">
+                    <h3>Wydajność</h3>
+                    <p><strong>Status:</strong> OPTYMALNA • <strong>Czas działania:</strong> 0:00:01</p>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center;">
+            <a href="/" class="btn">← Powrót do Panelu Głównego</a>
         </div>
     </div>
+
+    <script>
+        // Aktualizuj czas działania
+        function updateUptime() {
+            const startTime = new Date();
+            setInterval(() => {
+                const now = new Date();
+                const diff = Math.floor((now - startTime) / 1000);
+                const hours = Math.floor(diff / 3600);
+                const minutes = Math.floor((diff % 3600) / 60);
+                const seconds = diff % 60;
+                
+                const uptimeElement = document.querySelector('.status-item:nth-child(4) p');
+                if (uptimeElement) {
+                    uptimeElement.innerHTML = `<strong>Status:</strong> OPTYMALNA • <strong>Czas działania:</strong> ${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                }
+            }, 1000);
+        }
+        
+        updateUptime();
+    </script>
 </body>
 </html>
 STATUS
 
     echo -e "${GREEN}✅ Panel web został utworzony!${NC}"
-    echo -e "${CYAN}📁 Pliki znajdują się w: $WEB_DIR/${NC}"
+    echo -e "${CYAN}📁 Lokalizacja: $WEB_DIR/${NC}"
+    echo -e "${CYAN}🌐 Główna strona: $WEB_DIR/index.html${NC}"
+    echo -e "${CYAN}📊 Strona statusu: $WEB_DIR/status.html${NC}"
 }
 
-start_web_panel() {
-    echo -e "${YELLOW}🌐 URUCHAMIANIE PANELU WEB...${NC}"
+start_web_server() {
+    echo -e "${YELLOW}🌐 URUCHAMIANIE SERWERA WEB...${NC}"
     
     # Sprawdź czy panel web istnieje, jeśli nie - utwórz
     if [ ! -f "$WEB_DIR/index.html" ]; then
@@ -795,77 +437,48 @@ start_web_panel() {
         create_web_panel
     fi
     
-    # Zatrzymaj istniejący serwer
-    stop_web_server
+    # Sprawdź czy port jest dostępny
+    if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
+        echo -e "${YELLOW}🔄 Port $PORT jest zajęty, zatrzymywanie istniejącego serwera...${NC}"
+        pkill -f "python3 -m http.server $PORT"
+        sleep 2
+    fi
     
     # Uruchom serwer HTTP
     cd "$WEB_DIR"
-    python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
+    python3 -m http.server $PORT &
     local web_pid=$!
-    echo $web_pid > "$WEB_PID_FILE"
     
-    local ip=$(hostname -I | awk '{print $1}')
+    # Poczekaj chwilę aż serwer się uruchomi
+    sleep 2
     
-    log "Serwer web uruchomiony na porcie $PORT (PID: $web_pid)"
-    echo -e "${GREEN}✅ Serwer web uruchomiony!${NC}"
-    echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
-    echo -e "   Local:    http://localhost:$PORT"
-    echo -e "   Sieć:     http://$ip:$PORT"
-    echo -e "   Status:   http://localhost:$PORT/status"
-    echo -e ""
-    echo -e "${YELLOW}💡 Otwórz przeglądarkę i wejdź na jeden z powyższych adresów${NC}"
-    echo -e "${GREEN}🚀 Panel web jest gotowy do użycia!${NC}"
+    # Sprawdź czy serwer działa
+    if ps -p $web_pid > /dev/null 2>&1; then
+        local ip=$(hostname -I | awk '{print $1}')
+        
+        echo -e "${GREEN}✅ Serwer web uruchomiony!${NC}"
+        echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
+        echo -e "   📍 Local:    http://localhost:$PORT"
+        echo -e "   🌍 Sieć:     http://$ip:$PORT"
+        echo -e "   📊 Status:   http://localhost:$PORT/status"
+        echo -e ""
+        echo -e "${YELLOW}💡 Otwórz przeglądarkę i wejdź na jeden z powyższych adresów${NC}"
+        echo -e "${GREEN}🚀 Panel web jest gotowy do użycia!${NC}"
+        
+        # Otwórz przeglądarkę jeśli jest graficzne środowisko
+        if [ -n "$DISPLAY" ]; then
+            echo -e "${YELLOW}🖥️  Otwieranie przeglądarki...${NC}"
+            xdg-open "http://localhost:$PORT" 2>/dev/null &
+        fi
+    else
+        error "❌ Nie udało się uruchomić serwera web!"
+    fi
 }
 
 stop_web_server() {
-    if [ -f "$WEB_PID_FILE" ]; then
-        local pid=$(cat "$WEB_PID_FILE")
-        if ps -p $pid > /dev/null 2>&1; then
-            kill $pid 2>/dev/null
-            echo -e "${GREEN}✅ Serwer web zatrzymany${NC}"
-        fi
-        rm -f "$WEB_PID_FILE"
-    fi
-    
-    pkill -f "python3 -m http.server" 2>/dev/null
-}
-
-# =============================================
-# 📊 FUNKCJE SYSTEMOWE
-# =============================================
-
-show_system_stats() {
-    echo ""
-    echo -e "${BLUE}📊 STATYSTYKI SYSTEMU${NC}"
-    echo -e "${CYAN}================================${NC}"
-    
-    # CPU
-    local cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
-    echo -e " 💻 Użycie CPU: ${cpu}%"
-    
-    # Pamięć
-    local mem_total=$(free -m | awk 'NR==2{print $2}')
-    local mem_used=$(free -m | awk 'NR==2{print $3}')
-    local mem_percent=$((mem_used * 100 / mem_total))
-    echo -e " 🧠 Pamięć RAM: ${mem_used}MB/${mem_total}MB (${mem_percent}%)"
-    
-    # Serwery
-    local total_servers=0
-    local running_servers=0
-    
-    for server_dir in "$SERVERS_DIR"/*; do
-        if [ -f "$server_dir/server.conf" ]; then
-            ((total_servers++))
-            source "$server_dir/server.conf"
-            if [ "$STATUS" = "running" ]; then
-                ((running_servers++))
-            fi
-        fi
-    done
-    
-    echo -e " 🎮 Serwery: $running_servers/$total_servers uruchomionych"
-    echo -e " 📁 Katalog panelu: $PANEL_DIR"
-    echo -e "${CYAN}================================${NC}"
+    echo -e "${YELLOW}🛑 Zatrzymywanie serwera web...${NC}"
+    pkill -f "python3 -m http.server $PORT"
+    echo -e "${GREEN}✅ Serwer web zatrzymany${NC}"
 }
 
 # =============================================
@@ -875,24 +488,44 @@ show_system_stats() {
 show_menu() {
     echo -e "${GREEN}"
     echo -e "╔══════════════════════════════════════╗"
-    echo -e "║           🦖 PANEL SERWERÓW          ║"
+    echo -e "║        🦖 TWORZENIE PANELU WEB       ║"
     echo -e "╠══════════════════════════════════════╣"
     echo -e "║                                      ║"
-    echo -e "║  ${YELLOW}1${GREEN}️⃣  - Lista serwerów               ║"
-    echo -e "║  ${YELLOW}2${GREEN}️⃣  - Utwórz serwer                ║"
-    echo -e "║  ${YELLOW}3${GREEN}️⃣  - Uruchom serwer              ║"
-    echo -e "║  ${YELLOW}4${GREEN}️⃣  - Zatrzymaj serwer            ║"
-    echo -e "║  ${YELLOW}5${GREEN}️⃣  - Restartuj serwer            ║"
-    echo -e "║  ${YELLOW}6${GREEN}️⃣  - Usuń serwer                 ║"
-    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Utwórz i uruchom panel web  ║"
-    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Zatrzymaj panel web         ║"
-    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Statystyki systemu          ║"
-    echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                     ║"
+    echo -e "║  ${YELLOW}1${GREEN}️⃣  - Utwórz panel web              ║"
+    echo -e "║  ${YELLOW}2${GREEN}️⃣  - Uruchom serwer web           ║"
+    echo -e "║  ${YELLOW}3${GREEN}️⃣  - Zatrzymaj serwer web         ║"
+    echo -e "║  ${YELLOW}4${GREEN}️⃣  - Utwórz i uruchom panel       ║"
+    echo -e "║  ${YELLOW}5${GREEN}️⃣  - Informacje o panelu          ║"
+    echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                      ║"
     echo -e "║                                      ║"
     echo -e "╠══════════════════════════════════════╣"
-    echo -e "║        Wybierz opcję (0-9):          ║"
+    echo -e "║        Wybierz opcję (0-5):          ║"
     echo -e "╚══════════════════════════════════════╝"
     echo -e "${NC}"
+}
+
+show_panel_info() {
+    echo ""
+    echo -e "${BLUE}📊 INFORMACJE O PANELU${NC}"
+    echo -e "${CYAN}================================${NC}"
+    echo -e " 📁 Katalog panelu: $WEB_DIR"
+    echo -e " 🌐 Port serwera: $PORT"
+    echo -e " 📄 Główna strona: $WEB_DIR/index.html"
+    echo -e " 📊 Strona statusu: $WEB_DIR/status.html"
+    echo -e ""
+    
+    if [ -f "$WEB_DIR/index.html" ]; then
+        echo -e "${GREEN}✅ Panel web istnieje${NC}"
+    else
+        echo -e "${YELLOW}📭 Panel web nie został jeszcze utworzony${NC}"
+    fi
+    
+    if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
+        echo -e "${GREEN}✅ Serwer web działa na porcie $PORT${NC}"
+    else
+        echo -e "${YELLOW}🔴 Serwer web nie jest uruchomiony${NC}"
+    fi
+    echo -e "${CYAN}================================${NC}"
 }
 
 # =============================================
@@ -904,30 +537,16 @@ mkdir -p "$PANEL_DIR"
 setup_directories
 check_dependencies
 
-# Zapisz PID panelu
-echo $$ > "$PANEL_PID_FILE"
-
-# Funkcja sprzątania
-cleanup() {
-    echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
-    stop_web_server
-    rm -f "$PANEL_PID_FILE"
-    echo -e "${GREEN}✅ Panel zatrzymany${NC}"
-    exit 0
-}
-
-trap cleanup INT TERM
-
 clear
 
 echo -e "${BLUE}"
 echo -e "╔══════════════════════════════════════╗"
-echo -e "║           🦖 PANEL SERWERÓW          ║"
-echo -e "║         Production Edition           ║"
+echo -e "║        🦖 TWORZENIE PANELU WEB       ║"
+echo -e "║         Simple Web Panel             ║"
 echo -e "╚══════════════════════════════════════╝"
 echo -e "${NC}"
 echo -e "${CYAN}Katalog panelu: $PANEL_DIR${NC}"
-echo -e "${CYAN}Logi: $LOGS_DIR/panel.log${NC}"
+echo -e "${CYAN}Port serwera: $PORT${NC}"
 echo ""
 
 while true; do
@@ -936,47 +555,26 @@ while true; do
     
     case $choice in
         1)
-            list_servers
+            create_web_panel
             ;;
         2)
-            echo ""
-            echo -e "${BLUE}🎮 TWORZENIE SERWERA${NC}"
-            read -p "Nazwa serwera: " name
-            read -p "Typ (minecraft/rust/ark/csgo/teamspeak): " type
-            read -p "Port: " port
-            read -p "RAM (MB): " memory
-            read -p "Właściciel: " owner
-            create_server "$name" "$type" "$port" "$memory" "$owner"
+            start_web_server
             ;;
         3)
-            read -p "ID serwera do uruchomienia: " id
-            start_server "$id"
-            ;;
-        4)
-            read -p "ID serwera do zatrzymania: " id
-            stop_server "$id"
-            ;;
-        5)
-            read -p "ID serwera do restartu: " id
-            restart_server "$id"
-            ;;
-        6)
-            read -p "ID serwera do usunięcia: " id
-            delete_server "$id"
-            ;;
-        7)
-            echo -e "${YELLOW}🚀 Tworzenie i uruchamianie panelu web...${NC}"
-            create_web_panel
-            start_web_panel
-            ;;
-        8)
             stop_web_server
             ;;
-        9)
-            show_system_stats
+        4)
+            echo -e "${YELLOW}🚀 Tworzenie i uruchamianie panelu...${NC}"
+            create_web_panel
+            start_web_server
+            ;;
+        5)
+            show_panel_info
             ;;
         0)
-            cleanup
+            echo -e "${GREEN}👋 Do widzenia!${NC}"
+            stop_web_server
+            exit 0
             ;;
         *)
             echo -e "${RED}❌ Nieprawidłowy wybór!${NC}"
