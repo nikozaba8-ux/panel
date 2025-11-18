@@ -1,60 +1,821 @@
 #!/bin/bash
 
-echo "🦖 Instalacja Panelu Pterodactyl - Production Edition"
+# =============================================
+# 🦖 PANEL SERWERÓW - PRODUCTION
+# =============================================
 
-# Sprawdź czy jest root
-if [ "$EUID" -ne 0 ]; then
-    echo "❌ Uruchom jako root: sudo ./install-panel.sh"
-    exit 1
-fi
+# Konfiguracja
+PANEL_DIR="/home/panel"
+SERVERS_DIR="$PANEL_DIR/servers"
+LOGS_DIR="$PANEL_DIR/logs"
+BACKUPS_DIR="$PANEL_DIR/backups"
+CONFIG_DIR="$PANEL_DIR/config"
+WEB_DIR="$PANEL_DIR/web"
+USERS_FILE="$PANEL_DIR/users.db"
+PANEL_PID_FILE="$PANEL_DIR/panel.pid"
+WEB_PID_FILE="$PANEL_DIR/web.pid"
+PORT=8080
 
-# Aktualizacja systemu
-echo "📦 Aktualizowanie systemu..."
-apt update && apt upgrade -y
+# Kolory
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Instalacja zależności
-echo "🔧 Instalowanie zależności..."
-apt install -y netcat-openbsd jq wget curl python3 default-jre screen tmux
+# =============================================
+# 🛠️ FUNKCJE POMOCNICZE
+# =============================================
 
-# Utwórz katalog panelu
-mkdir -p /var/www/panel
-cp panel.sh /var/www/panel/
-chmod +x /var/www/panel/panel.sh
+log() {
+    echo -e "${GREEN}[$(date '+%Y-%m-%d %H:%M:%S')]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+}
 
-# Utwórz symbolic link
-ln -sf /var/www/panel/panel.sh /usr/local/bin/pterodactyl-panel
+error() {
+    echo -e "${RED}[BŁĄD]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+}
 
-# Utwórz service systemd
-cat > /etc/systemd/system/pterodactyl-panel.service << SERVICE_EOF
-[Unit]
-Description=Pterodactyl-like Panel
-After=network.target
+warning() {
+    echo -e "${YELLOW}[OSTRZEŻENIE]${NC} $1" | tee -a "$LOGS_DIR/panel.log"
+}
 
-[Service]
-Type=simple
-User=root
-WorkingDirectory=/var/www/panel
-ExecStart=/var/www/panel/panel.sh
-Restart=always
-RestartSec=3
+setup_directories() {
+    mkdir -p "$SERVERS_DIR" "$LOGS_DIR" "$BACKUPS_DIR" "$CONFIG_DIR" "$WEB_DIR"
+    log "Katalogi utworzone"
+}
 
-[Install]
-WantedBy=multi-user.target
-SERVICE_EOF
+check_dependencies() {
+    local missing=()
+    for cmd in nc screen java python3 curl; do
+        if ! command -v $cmd &> /dev/null; then
+            missing+=("$cmd")
+        fi
+    done
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        warning "Brakujące zależności: ${missing[*]}"
+        echo "Instalowanie..."
+        apt update > /dev/null 2>&1
+        apt install -y netcat-openbsd screen default-jre python3 curl > /dev/null 2>&1
+    fi
+}
 
-systemctl daemon-reload
+# =============================================
+# 🎮 ZARZĄDZANIE SERWERAMI
+# =============================================
 
+create_server() {
+    echo ""
+    echo -e "${BLUE}🎮 TWORZENIE NOWEGO SERWERA${NC}"
+    echo -e "${CYAN}================================${NC}"
+    
+    read -p "Nazwa serwera: " name
+    read -p "Typ serwera (minecraft/rust/ark): " type
+    read -p "Port (domyślnie 25565): " port
+    read -p "Pamięć RAM w MB (domyślnie 1024): " memory
+    read -p "Właściciel: " owner
+    
+    port=${port:-25565}
+    memory=${memory:-1024}
+    id=$(echo "$name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+    
+    # Sprawdź czy port jest wolny
+    if nc -z localhost $port 2>/dev/null; then
+        error "Port $port jest zajęty!"
+        return 1
+    fi
+    
+    # Sprawdź czy serwer już istnieje
+    if [ -d "$SERVERS_DIR/$id" ]; then
+        error "Serwer o ID '$id' już istnieje!"
+        return 1
+    fi
+    
+    # Utwórz katalog serwera
+    mkdir -p "$SERVERS_DIR/$id"
+    
+    # Zapisz konfigurację
+    cat > "$SERVERS_DIR/$id/server.conf" << CONF
+ID="$id"
+NAME="$name"
+TYPE="$type"
+PORT="$port"
+MEMORY="$memory"
+OWNER="$owner"
+STATUS="stopped"
+PID=""
+CREATED="$(date '+%Y-%m-%d %H:%M:%S')"
+CONF
+
+    # Utwórz skrypt startowy
+    case $type in
+        minecraft)
+            create_minecraft_server "$id" "$memory"
+            ;;
+        rust)
+            create_rust_server "$id" "$port"
+            ;;
+        ark)
+            create_ark_server "$id" "$port"
+            ;;
+        *)
+            create_custom_server "$id"
+            ;;
+    esac
+    
+    log "Utworzono serwer: $name (ID: $id, Port: $port)"
+    echo -e "${GREEN}✅ Serwer '$name' utworzony pomyślnie!${NC}"
+    echo -e "${CYAN}ID: $id | Port: $port | RAM: ${memory}MB${NC}"
+}
+
+create_minecraft_server() {
+    local id=$1
+    local memory=$2
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << 'START'
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "Uruchamianie serwera Minecraft..."
+java -Xmx${MEMORY}M -Xms${MEMORY}M -jar server.jar nogui
+START
+    
+    chmod +x "$dir/start.sh"
+    
+    # Pobierz serwer Minecraft jeśli nie istnieje
+    if [ ! -f "$dir/server.jar" ]; then
+        echo -e "${YELLOW}📥 Pobieranie serwera Minecraft...${NC}"
+        wget -q -O "$dir/server.jar" "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
+        echo "eula=true" > "$dir/eula.txt"
+        echo -e "${GREEN}✅ Pobrano serwer Minecraft${NC}"
+    fi
+}
+
+create_rust_server() {
+    local id=$1
+    local port=$2
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << START
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "Uruchamianie serwera Rust na porcie $port..."
+while true; do
+    echo "[RUST] Serwer działa na porcie $port - $(date)"
+    sleep 10
+done
+START
+    
+    chmod +x "$dir/start.sh"
+    echo -e "${YELLOW}⚠️  Serwer Rust wymaga ręcznej instalacji SteamCMD${NC}"
+}
+
+create_ark_server() {
+    local id=$1
+    local port=$2
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << START
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "Uruchamianie serwera ARK na porcie $port..."
+while true; do
+    echo "[ARK] Serwer działa na porcie $port - $(date)"
+    sleep 10
+done
+START
+    
+    chmod +x "$dir/start.sh"
+    echo -e "${YELLOW}⚠️  Serwer ARK wymaga ręcznej instalacji SteamCMD${NC}"
+}
+
+create_custom_server() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << 'START'
+#!/bin/bash
+cd "$(dirname "$0")"
+echo "Uruchamianie serwera..."
+while true; do
+    echo "[CUSTOM] Serwer działa - $(date)"
+    sleep 10
+done
+START
+    
+    chmod +x "$dir/start.sh"
+}
+
+start_server() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -d "$dir" ]; then
+        error "Serwer '$id' nie istnieje!"
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    
+    if [ "$STATUS" = "running" ]; then
+        warning "Serwer '$NAME' jest już uruchomiony!"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}🚀 Uruchamianie serwera '$NAME'...${NC}"
+    
+    # Uruchom w screen session
+    cd "$dir"
+    screen -dmS "server_$id" bash start.sh
+    local pid=$!
+    
+    # Zapisz PID i status
+    sed -i "s/STATUS=.*/STATUS=\"running\"/" "$dir/server.conf"
+    sed -i "s/PID=.*/PID=\"$pid\"/" "$dir/server.conf"
+    
+    log "Uruchomiono serwer: $NAME (PID: $pid)"
+    echo -e "${GREEN}✅ Serwer '$NAME' uruchomiony!${NC}"
+    echo -e "${CYAN}🖥️  Screen: server_$id | Port: $PORT${NC}"
+}
+
+stop_server() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -d "$dir" ]; then
+        error "Serwer '$id' nie istnieje!"
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    
+    if [ "$STATUS" != "running" ]; then
+        warning "Serwer '$NAME' nie jest uruchomiony!"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}🛑 Zatrzymywanie serwera '$NAME'...${NC}"
+    
+    # Zabij proces
+    if [ -n "$PID" ]; then
+        kill "$PID" 2>/dev/null
+    fi
+    
+    # Zabij screen session
+    screen -S "server_$id" -X quit 2>/dev/null
+    
+    # Zaktualizuj status
+    sed -i "s/STATUS=.*/STATUS=\"stopped\"/" "$dir/server.conf"
+    sed -i "s/PID=.*/PID=\"\"/" "$dir/server.conf"
+    
+    log "Zatrzymano serwer: $NAME"
+    echo -e "${GREEN}✅ Serwer '$NAME' zatrzymany!${NC}"
+}
+
+restart_server() {
+    local id=$1
+    stop_server "$id"
+    sleep 2
+    start_server "$id"
+}
+
+list_servers() {
+    echo ""
+    echo -e "${BLUE}🎮 LISTA SERWERÓW${NC}"
+    echo -e "${CYAN}================================${NC}"
+    
+    if [ ! "$(ls -A $SERVERS_DIR)" ]; then
+        echo -e "${YELLOW}📭 Brak serwerów${NC}"
+        return
+    fi
+    
+    for server_dir in "$SERVERS_DIR"/*; do
+        if [ -f "$server_dir/server.conf" ]; then
+            source "$server_dir/server.conf"
+            
+            local status_color=$GREEN
+            local status_icon="🟢"
+            if [ "$STATUS" != "running" ]; then
+                status_color=$RED
+                status_icon="🔴"
+            fi
+            
+            echo -e " $status_icon $NAME"
+            echo -e "   📍 ID: $ID | 🚪 Port: $PORT"
+            echo -e "   🧠 RAM: ${MEMORY}MB | 👤 Właściciel: $OWNER"
+            echo -e "   📊 Status: ${status_color}$STATUS${NC}"
+            echo -e "${CYAN}--------------------------------${NC}"
+        fi
+    done
+}
+
+delete_server() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -d "$dir" ]; then
+        error "Serwer '$id' nie istnieje!"
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    
+    echo -e "${RED}🗑️  USUWANIE SERWERA${NC}"
+    echo -e "Nazwa: $NAME"
+    echo -e "ID: $ID"
+    echo -e "Port: $PORT"
+    echo ""
+    read -p "Czy na pewno chcesz usunąć ten serwer? (T/N): " confirm
+    
+    if [[ $confirm =~ ^[Tt]$ ]]; then
+        # Zatrzymaj serwer jeśli działa
+        if [ "$STATUS" = "running" ]; then
+            stop_server "$id"
+        fi
+        
+        # Usuń katalog
+        rm -rf "$dir"
+        log "Usunięto serwer: $NAME"
+        echo -e "${GREEN}✅ Serwer '$NAME' został usunięty!${NC}"
+    else
+        echo -e "${YELLOW}❌ Anulowano usuwanie${NC}"
+    fi
+}
+
+# =============================================
+# 🌐 PANEL WEB
+# =============================================
+
+start_web_panel() {
+    echo -e "${YELLOW}🌐 URUCHAMIANIE PANELU WEB...${NC}"
+    
+    stop_web_panel
+    
+    # Utwórz interfejs web
+    create_web_interface
+    
+    # Uruchom serwer web
+    cd "$WEB_DIR"
+    python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
+    echo $! > "$WEB_PID_FILE"
+    
+    local ip=$(hostname -I | awk '{print $1}')
+    
+    log "Panel web uruchomiony na porcie $PORT"
+    echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
+    echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
+    echo -e "   Local:    http://localhost:$PORT"
+    echo -e "   Sieć:     http://$ip:$PORT"
+    echo -e "   Status:   http://localhost:$PORT/status"
+}
+
+stop_web_panel() {
+    if [ -f "$WEB_PID_FILE" ]; then
+        local pid=$(cat "$WEB_PID_FILE")
+        kill "$pid" 2>/dev/null
+        rm -f "$WEB_PID_FILE"
+    fi
+    pkill -f "python3 -m http.server" 2>/dev/null
+}
+
+create_web_interface() {
+    # Strona główna
+    cat > "$WEB_DIR/index.html" << 'HTML'
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦖 Panel Serwerów</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: 'Arial', sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; 
+            color: #333;
+            padding: 20px;
+        }
+        .container { 
+            max-width: 1200px; 
+            margin: 0 auto; 
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        .header { 
+            text-align: center; 
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 2px solid #eee;
+        }
+        .header h1 { 
+            font-size: 2.5em; 
+            color: #2d3748;
+            margin-bottom: 10px;
+        }
+        .server-list {
+            display: grid;
+            gap: 20px;
+            margin: 20px 0;
+        }
+        .server-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border-left: 4px solid #4299e1;
+        }
+        .server-card.running { border-left-color: #48bb78; }
+        .server-card.stopped { border-left-color: #e53e3e; }
+        .server-header {
+            display: flex;
+            justify-content: between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        .server-name {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #2d3748;
+        }
+        .server-status {
+            padding: 5px 10px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            font-weight: bold;
+        }
+        .status-running { background: #c6f6d5; color: #276749; }
+        .status-stopped { background: #fed7d7; color: #c53030; }
+        .server-info {
+            color: #718096;
+            margin: 10px 0;
+        }
+        .btn {
+            padding: 8px 15px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            margin: 2px;
+            font-weight: bold;
+        }
+        .btn-start { background: #48bb78; color: white; }
+        .btn-stop { background: #e53e3e; color: white; }
+        .btn-restart { background: #ed8936; color: white; }
+        .btn-delete { background: #a0aec0; color: white; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🦖 Panel Serwerów</h1>
+            <p>Zarządzanie serwerami gry w czasie rzeczywistym</p>
+        </div>
+
+        <div class="server-list" id="serverList">
+            <p>Ładowanie serwerów...</p>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <button onclick="refreshServers()" style="padding: 10px 20px; background: #4299e1; color: white; border: none; border-radius: 5px; cursor: pointer;">
+                🔄 Odśwież
+            </button>
+        </div>
+    </div>
+
+    <script>
+        async function refreshServers() {
+            try {
+                const response = await fetch('/api/servers');
+                const servers = await response.json();
+                
+                const container = document.getElementById('serverList');
+                container.innerHTML = '';
+                
+                servers.forEach(server => {
+                    const statusClass = server.status === 'running' ? 'running' : 'stopped';
+                    const statusText = server.status === 'running' ? 'DZIAŁA' : 'ZATRZYMANY';
+                    
+                    container.innerHTML += `
+                        <div class="server-card ${statusClass}">
+                            <div class="server-header">
+                                <div class="server-name">${server.name}</div>
+                                <div class="server-status status-${server.status}">${statusText}</div>
+                            </div>
+                            <div class="server-info">
+                                <strong>ID:</strong> ${server.id} | 
+                                <strong>Port:</strong> ${server.port} | 
+                                <strong>RAM:</strong> ${server.memory}MB
+                            </div>
+                            <div class="server-info">
+                                <strong>Typ:</strong> ${server.type} | 
+                                <strong>Właściciel:</strong> ${server.owner}
+                            </div>
+                            <div>
+                                ${server.status !== 'running' ? 
+                                    `<button class="btn btn-start" onclick="controlServer('${server.id}', 'start')">▶ Start</button>` : 
+                                    `<button class="btn btn-stop" onclick="controlServer('${server.id}', 'stop')">⏹ Stop</button>`
+                                }
+                                <button class="btn btn-restart" onclick="controlServer('${server.id}', 'restart')">🔄 Restart</button>
+                                <button class="btn btn-delete" onclick="deleteServer('${server.id}')">🗑 Usuń</button>
+                            </div>
+                        </div>
+                    `;
+                });
+            } catch (error) {
+                document.getElementById('serverList').innerHTML = '<p>❌ Błąd ładowania serwerów</p>';
+            }
+        }
+
+        async function controlServer(serverId, action) {
+            try {
+                const response = await fetch(`/api/server/${serverId}/${action}`, { method: 'POST' });
+                const result = await response.json();
+                alert(result.message);
+                refreshServers();
+            } catch (error) {
+                alert('❌ Błąd: ' + error);
+            }
+        }
+
+        async function deleteServer(serverId) {
+            if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
+                try {
+                    const response = await fetch(`/api/server/${serverId}/delete`, { method: 'POST' });
+                    const result = await response.json();
+                    alert(result.message);
+                    refreshServers();
+                } catch (error) {
+                    alert('❌ Błąd: ' + error);
+                }
+            }
+        }
+
+        // Odśwież przy starcie i co 30 sekund
+        refreshServers();
+        setInterval(refreshServers, 30000);
+    </script>
+</body>
+</html>
+HTML
+
+    # Strona statusu
+    cat > "$WEB_DIR/status.html" << 'STATUS'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Status Panelu</title>
+    <style>
+        body { font-family: Arial; padding: 20px; }
+        .status { padding: 10px; margin: 5px; border-radius: 5px; }
+        .online { background: #d4edda; color: #155724; }
+        .offline { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🦖 Status Panelu</h1>
+    <div class="status online">✅ Panel działa poprawnie</div>
+    <div class="status online">🌐 Serwer web aktywny</div>
+    <div><a href="/">← Powrót do panelu</a></div>
+</body>
+</html>
+STATUS
+
+    # Proste API
+    mkdir -p "$WEB_DIR/api"
+    
+    # Skrypt API w Pythonie
+    cat > "$WEB_DIR/api/server.py" << 'PYTHON'
+#!/usr/bin/env python3
+import json
+import os
+import subprocess
+
+SERVERS_DIR = "/home/panel/servers"
+
+def get_servers():
+    servers = []
+    for server_id in os.listdir(SERVERS_DIR):
+        server_dir = os.path.join(SERVERS_DIR, server_id)
+        conf_file = os.path.join(server_dir, "server.conf")
+        
+        if os.path.isfile(conf_file):
+            with open(conf_file, 'r') as f:
+                config = {}
+                for line in f:
+                    if '=' in line:
+                        key, value = line.strip().split('=', 1)
+                        config[key] = value.strip('"')
+                
+                servers.append({
+                    'id': config.get('ID', ''),
+                    'name': config.get('NAME', ''),
+                    'type': config.get('TYPE', ''),
+                    'port': config.get('PORT', ''),
+                    'memory': config.get('MEMORY', ''),
+                    'owner': config.get('OWNER', ''),
+                    'status': config.get('STATUS', 'stopped')
+                })
+    
+    return servers
+
+if __name__ == "__main__":
+    print("Content-Type: application/json\n")
+    print(json.dumps(get_servers()))
+PYTHON
+
+    chmod +x "$WEB_DIR/api/server.py"
+    
+    echo -e "${GREEN}✅ Interfejs web utworzony${NC}"
+}
+
+# =============================================
+# 📊 FUNKCJE SYSTEMOWE
+# =============================================
+
+show_system_stats() {
+    echo ""
+    echo -e "${BLUE}📊 STATYSTYKI SYSTEMU${NC}"
+    echo -e "${CYAN}================================${NC}"
+    
+    # CPU
+    local cpu=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}')
+    echo -e " 💻 Użycie CPU: ${cpu}%"
+    
+    # Pamięć
+    local mem_total=$(free -m | awk 'NR==2{print $2}')
+    local mem_used=$(free -m | awk 'NR==2{print $3}')
+    local mem_percent=$((mem_used * 100 / mem_total))
+    echo -e " 🧠 Pamięć RAM: ${mem_used}MB/${mem_total}MB (${mem_percent}%)"
+    
+    # Serwery
+    local total_servers=0
+    local running_servers=0
+    
+    for server_dir in "$SERVERS_DIR"/*; do
+        if [ -f "$server_dir/server.conf" ]; then
+            ((total_servers++))
+            source "$server_dir/server.conf"
+            if [ "$STATUS" = "running" ]; then
+                ((running_servers++))
+            fi
+        fi
+    done
+    
+    echo -e " 🎮 Serwery: $running_servers/$total_servers uruchomionych"
+    echo -e " 📁 Katalog panelu: $PANEL_DIR"
+    echo -e "${CYAN}================================${NC}"
+}
+
+create_backup() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -d "$dir" ]; then
+        error "Serwer '$id' nie istnieje!"
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    
+    local backup_name="${id}-backup-$(date '+%Y%m%d-%H%M%S')"
+    local backup_file="$BACKUPS_DIR/$backup_name.tar.gz"
+    
+    echo -e "${YELLOW}📦 Tworzenie backupu serwera '$NAME'...${NC}"
+    
+    # Zatrzymaj serwer jeśli działa
+    local was_running=false
+    if [ "$STATUS" = "running" ]; then
+        was_running=true
+        stop_server "$id"
+        sleep 2
+    fi
+    
+    # Utwórz backup
+    tar -czf "$backup_file" -C "$SERVERS_DIR" "$id" 2>/dev/null
+    
+    # Uruchom ponownie jeśli był uruchomiony
+    if [ "$was_running" = true ]; then
+        start_server "$id"
+    fi
+    
+    if [ -f "$backup_file" ]; then
+        log "Utworzono backup: $backup_name"
+        echo -e "${GREEN}✅ Backup utworzony: $backup_file${NC}"
+    else
+        error "Błąd podczas tworzenia backupu!"
+    fi
+}
+
+# =============================================
+# 🎯 MENU GŁÓWNE
+# =============================================
+
+show_menu() {
+    echo -e "${GREEN}"
+    echo -e "╔══════════════════════════════════════╗"
+    echo -e "║           🦖 PANEL SERWERÓW          ║"
+    echo -e "╠══════════════════════════════════════╣"
+    echo -e "║                                      ║"
+    echo -e "║  ${YELLOW}1${GREEN}️⃣  - Lista serwerów               ║"
+    echo -e "║  ${YELLOW}2${GREEN}️⃣  - Utwórz serwer                ║"
+    echo -e "║  ${YELLOW}3${GREEN}️⃣  - Uruchom serwer              ║"
+    echo -e "║  ${YELLOW}4${GREEN}️⃣  - Zatrzymaj serwer            ║"
+    echo -e "║  ${YELLOW}5${GREEN}️⃣  - Restartuj serwer            ║"
+    echo -e "║  ${YELLOW}6${GREEN}️⃣  - Usuń serwer                 ║"
+    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Panel web                   ║"
+    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Statystyki                  ║"
+    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Backup serwera              ║"
+    echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                     ║"
+    echo -e "║                                      ║"
+    echo -e "╠══════════════════════════════════════╣"
+    echo -e "║        Wybierz opcję (0-9):          ║"
+    echo -e "╚══════════════════════════════════════╝"
+    echo -e "${NC}"
+}
+
+# =============================================
+# 📜 MAIN SCRIPT
+# =============================================
+
+# Inicjalizacja
+mkdir -p "$PANEL_DIR"
+setup_directories
+check_dependencies
+
+# Zapisz PID panelu
+echo $$ > "$PANEL_PID_FILE"
+
+# Funkcja sprzątania
+cleanup() {
+    echo -e "\n${YELLOW}🛑 Zatrzymywanie panelu...${NC}"
+    stop_web_panel
+    rm -f "$PANEL_PID_FILE"
+    echo -e "${GREEN}✅ Panel zatrzymany${NC}"
+    exit 0
+}
+
+trap cleanup INT TERM
+
+clear
+
+echo -e "${BLUE}"
+echo -e "╔══════════════════════════════════════╗"
+echo -e "║           🦖 PANEL SERWERÓW          ║"
+echo -e "║         Production Edition           ║"
+echo -e "╚══════════════════════════════════════╝"
+echo -e "${NC}"
+echo -e "${CYAN}Katalog panelu: $PANEL_DIR${NC}"
+echo -e "${CYAN}Logi: $LOGS_DIR/panel.log${NC}"
 echo ""
-echo "✅ Instalacja zakończona!"
-echo "🎯 Użyj: sudo pterodactyl-panel"
-echo "🌐 Lub: sudo /var/www/panel/panel.sh"
-echo ""
-echo "📋 Dostępne opcje:"
-echo "   1 - Zarządzanie serwerami"
-echo "   2 - Zarządzanie użytkownikami" 
-echo "   3 - Uruchom panel web"
-echo "   4 - Zatrzymaj panel web"
-echo "   5 - Statystyki systemu"
-echo "   6 - Backup serwera"
-echo "   7 - Konfiguracja"
-echo "   8 - Wyjście"
+
+while true; do
+    show_menu
+    read -p "Twój wybór: " choice
+    
+    case $choice in
+        1)
+            list_servers
+            ;;
+        2)
+            create_server
+            ;;
+        3)
+            read -p "ID serwera do uruchomienia: " id
+            start_server "$id"
+            ;;
+        4)
+            read -p "ID serwera do zatrzymania: " id
+            stop_server "$id"
+            ;;
+        5)
+            read -p "ID serwera do restartu: " id
+            restart_server "$id"
+            ;;
+        6)
+            read -p "ID serwera do usunięcia: " id
+            delete_server "$id"
+            ;;
+        7)
+            start_web_panel
+            ;;
+        8)
+            show_system_stats
+            ;;
+        9)
+            read -p "ID serwera do backupu: " id
+            create_backup "$id"
+            ;;
+        0)
+            cleanup
+            ;;
+        *)
+            echo -e "${RED}❌ Nieprawidłowy wybór!${NC}"
+            ;;
+    esac
+    
+    echo ""
+    read -p "Naciśnij Enter aby kontynuować..."
+    clear
+done
