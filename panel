@@ -66,29 +66,29 @@ check_dependencies() {
 # =============================================
 
 create_server() {
-    echo ""
-    echo -e "${BLUE}🎮 TWORZENIE NOWEGO SERWERA${NC}"
-    echo -e "${CYAN}================================${NC}"
+    local name="$1"
+    local type="$2"
+    local port="$3"
+    local memory="$4"
+    local owner="$5"
     
-    read -p "Nazwa serwera: " name
-    read -p "Typ serwera (minecraft/rust/ark): " type
-    read -p "Port (domyślnie 25565): " port
-    read -p "Pamięć RAM w MB (domyślnie 1024): " memory
-    read -p "Właściciel: " owner
-    
+    # Domyślne wartości
     port=${port:-25565}
     memory=${memory:-1024}
-    id=$(echo "$name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]')
+    owner=${owner:-admin}
+    
+    # Generuj ID
+    local id=$(echo "$name" | tr ' ' '-' | tr '[:upper:]' '[:lower:]' | tr -cd '[:alnum:]-')
     
     # Sprawdź czy port jest wolny
     if nc -z localhost $port 2>/dev/null; then
-        error "Port $port jest zajęty!"
+        echo "ERROR: Port $port jest zajęty!"
         return 1
     fi
     
     # Sprawdź czy serwer już istnieje
     if [ -d "$SERVERS_DIR/$id" ]; then
-        error "Serwer o ID '$id' już istnieje!"
+        echo "ERROR: Serwer o ID '$id' już istnieje!"
         return 1
     fi
     
@@ -119,14 +119,20 @@ CONF
         ark)
             create_ark_server "$id" "$port"
             ;;
+        csgo)
+            create_csgo_server "$id" "$port"
+            ;;
+        teamspeak)
+            create_teamspeak_server "$id" "$port"
+            ;;
         *)
             create_custom_server "$id"
             ;;
     esac
     
     log "Utworzono serwer: $name (ID: $id, Port: $port)"
-    echo -e "${GREEN}✅ Serwer '$name' utworzony pomyślnie!${NC}"
-    echo -e "${CYAN}ID: $id | Port: $port | RAM: ${memory}MB${NC}"
+    echo "SUCCESS: Serwer '$name' utworzony pomyślnie!"
+    return 0
 }
 
 create_minecraft_server() {
@@ -137,7 +143,9 @@ create_minecraft_server() {
     cat > "$dir/start.sh" << 'START'
 #!/bin/bash
 cd "$(dirname "$0")"
-echo "Uruchamianie serwera Minecraft..."
+source server.conf
+echo "Uruchamianie serwera Minecraft $NAME..."
+echo "Port: $PORT | RAM: ${MEMORY}MB"
 java -Xmx${MEMORY}M -Xms${MEMORY}M -jar server.jar nogui
 START
     
@@ -145,10 +153,16 @@ START
     
     # Pobierz serwer Minecraft jeśli nie istnieje
     if [ ! -f "$dir/server.jar" ]; then
-        echo -e "${YELLOW}📥 Pobieranie serwera Minecraft...${NC}"
+        echo "Pobieranie serwera Minecraft..."
         wget -q -O "$dir/server.jar" "https://piston-data.mojang.com/v1/objects/8f3112a1049751cc472ec13e397eade5336ca7ae/server.jar"
         echo "eula=true" > "$dir/eula.txt"
-        echo -e "${GREEN}✅ Pobrano serwer Minecraft${NC}"
+        
+        # Podstawowa konfiguracja
+        cat > "$dir/server.properties" << PROP
+server-port=$PORT
+online-mode=false
+max-players=20
+PROP
     fi
 }
 
@@ -160,15 +174,27 @@ create_rust_server() {
     cat > "$dir/start.sh" << START
 #!/bin/bash
 cd "$(dirname "$0")"
-echo "Uruchamianie serwera Rust na porcie $port..."
+source server.conf
+echo "Uruchamianie serwera Rust $NAME..."
+echo "Port: $PORT"
 while true; do
-    echo "[RUST] Serwer działa na porcie $port - $(date)"
-    sleep 10
+    echo "[RUST] Serwer \$NAME działa na porcie \$PORT - \$(date)"
+    sleep 30
 done
 START
     
     chmod +x "$dir/start.sh"
-    echo -e "${YELLOW}⚠️  Serwer Rust wymaga ręcznej instalacji SteamCMD${NC}"
+    
+    # Plik konfiguracyjny Rust
+    cat > "$dir/server.cfg" << RUST_CFG
+server.port $PORT
+server.level "Procedural Map"
+server.seed 1234
+server.worldsize 4000
+server.maxplayers 50
+server.hostname "$NAME"
+server.description "Panel Managed Rust Server"
+RUST_CFG
 }
 
 create_ark_server() {
@@ -179,15 +205,56 @@ create_ark_server() {
     cat > "$dir/start.sh" << START
 #!/bin/bash
 cd "$(dirname "$0")"
-echo "Uruchamianie serwera ARK na porcie $port..."
+source server.conf
+echo "Uruchamianie serwera ARK $NAME..."
+echo "Port: $PORT"
 while true; do
-    echo "[ARK] Serwer działa na porcie $port - $(date)"
-    sleep 10
+    echo "[ARK] Serwer \$NAME działa na porcie \$PORT - \$(date)"
+    sleep 30
 done
 START
     
     chmod +x "$dir/start.sh"
-    echo -e "${YELLOW}⚠️  Serwer ARK wymaga ręcznej instalacji SteamCMD${NC}"
+}
+
+create_csgo_server() {
+    local id=$1
+    local port=$2
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << START
+#!/bin/bash
+cd "$(dirname "$0")"
+source server.conf
+echo "Uruchamianie serwera CS:GO $NAME..."
+echo "Port: $PORT"
+while true; do
+    echo "[CSGO] Serwer \$NAME działa na porcie \$PORT - \$(date)"
+    sleep 30
+done
+START
+    
+    chmod +x "$dir/start.sh"
+}
+
+create_teamspeak_server() {
+    local id=$1
+    local port=$2
+    local dir="$SERVERS_DIR/$id"
+    
+    cat > "$dir/start.sh" << START
+#!/bin/bash
+cd "$(dirname "$0")"
+source server.conf
+echo "Uruchamianie serwera TeamSpeak $NAME..."
+echo "Port: $PORT"
+while true; do
+    echo "[TS3] Serwer \$NAME działa na porcie \$PORT - \$(date)"
+    sleep 30
+done
+START
+    
+    chmod +x "$dir/start.sh"
 }
 
 create_custom_server() {
@@ -197,10 +264,12 @@ create_custom_server() {
     cat > "$dir/start.sh" << 'START'
 #!/bin/bash
 cd "$(dirname "$0")"
-echo "Uruchamianie serwera..."
+source server.conf
+echo "Uruchamianie serwera $NAME..."
+echo "Port: $PORT | Typ: $TYPE"
 while true; do
-    echo "[CUSTOM] Serwer działa - $(date)"
-    sleep 10
+    echo "[$TYPE] Serwer $NAME działa na porcie $PORT - $(date)"
+    sleep 30
 done
 START
     
@@ -212,18 +281,18 @@ start_server() {
     local dir="$SERVERS_DIR/$id"
     
     if [ ! -d "$dir" ]; then
-        error "Serwer '$id' nie istnieje!"
+        echo "ERROR: Serwer '$id' nie istnieje!"
         return 1
     fi
     
     source "$dir/server.conf"
     
     if [ "$STATUS" = "running" ]; then
-        warning "Serwer '$NAME' jest już uruchomiony!"
+        echo "WARNING: Serwer '$NAME' jest już uruchomiony!"
         return 1
     fi
     
-    echo -e "${YELLOW}🚀 Uruchamianie serwera '$NAME'...${NC}"
+    echo "Uruchamianie serwera '$NAME'..."
     
     # Uruchom w screen session
     cd "$dir"
@@ -235,8 +304,8 @@ start_server() {
     sed -i "s/PID=.*/PID=\"$pid\"/" "$dir/server.conf"
     
     log "Uruchomiono serwer: $NAME (PID: $pid)"
-    echo -e "${GREEN}✅ Serwer '$NAME' uruchomiony!${NC}"
-    echo -e "${CYAN}🖥️  Screen: server_$id | Port: $PORT${NC}"
+    echo "SUCCESS: Serwer '$NAME' uruchomiony!"
+    return 0
 }
 
 stop_server() {
@@ -244,18 +313,18 @@ stop_server() {
     local dir="$SERVERS_DIR/$id"
     
     if [ ! -d "$dir" ]; then
-        error "Serwer '$id' nie istnieje!"
+        echo "ERROR: Serwer '$id' nie istnieje!"
         return 1
     fi
     
     source "$dir/server.conf"
     
     if [ "$STATUS" != "running" ]; then
-        warning "Serwer '$NAME' nie jest uruchomiony!"
+        echo "WARNING: Serwer '$NAME' nie jest uruchomiony!"
         return 1
     fi
     
-    echo -e "${YELLOW}🛑 Zatrzymywanie serwera '$NAME'...${NC}"
+    echo "Zatrzymywanie serwera '$NAME'..."
     
     # Zabij proces
     if [ -n "$PID" ]; then
@@ -270,7 +339,8 @@ stop_server() {
     sed -i "s/PID=.*/PID=\"\"/" "$dir/server.conf"
     
     log "Zatrzymano serwer: $NAME"
-    echo -e "${GREEN}✅ Serwer '$NAME' zatrzymany!${NC}"
+    echo "SUCCESS: Serwer '$NAME' zatrzymany!"
+    return 0
 }
 
 restart_server() {
@@ -278,6 +348,30 @@ restart_server() {
     stop_server "$id"
     sleep 2
     start_server "$id"
+}
+
+delete_server() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -d "$dir" ]; then
+        echo "ERROR: Serwer '$id' nie istnieje!"
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    
+    # Zatrzymaj serwer jeśli działa
+    if [ "$STATUS" = "running" ]; then
+        stop_server "$id"
+        sleep 2
+    fi
+    
+    # Usuń katalog
+    rm -rf "$dir"
+    log "Usunięto serwer: $NAME"
+    echo "SUCCESS: Serwer '$NAME' został usunięty!"
+    return 0
 }
 
 list_servers() {
@@ -310,41 +404,8 @@ list_servers() {
     done
 }
 
-delete_server() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -d "$dir" ]; then
-        error "Serwer '$id' nie istnieje!"
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    
-    echo -e "${RED}🗑️  USUWANIE SERWERA${NC}"
-    echo -e "Nazwa: $NAME"
-    echo -e "ID: $ID"
-    echo -e "Port: $PORT"
-    echo ""
-    read -p "Czy na pewno chcesz usunąć ten serwer? (T/N): " confirm
-    
-    if [[ $confirm =~ ^[Tt]$ ]]; then
-        # Zatrzymaj serwer jeśli działa
-        if [ "$STATUS" = "running" ]; then
-            stop_server "$id"
-        fi
-        
-        # Usuń katalog
-        rm -rf "$dir"
-        log "Usunięto serwer: $NAME"
-        echo -e "${GREEN}✅ Serwer '$NAME' został usunięty!${NC}"
-    else
-        echo -e "${YELLOW}❌ Anulowano usuwanie${NC}"
-    fi
-}
-
 # =============================================
-# 🌐 PANEL WEB
+# 🌐 PANEL WEB Z TWORZENIEM SERWERÓW
 # =============================================
 
 start_web_panel() {
@@ -355,7 +416,7 @@ start_web_panel() {
     # Utwórz interfejs web
     create_web_interface
     
-    # Uruchom serwer web
+    # Uruchom serwer web z obsługą CGI
     cd "$WEB_DIR"
     python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
     echo $! > "$WEB_PID_FILE"
@@ -416,6 +477,29 @@ create_web_interface() {
             color: #2d3748;
             margin-bottom: 10px;
         }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #ddd;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            border: 1px solid transparent;
+            border-bottom: none;
+            margin-right: 5px;
+            border-radius: 5px 5px 0 0;
+        }
+        .tab.active {
+            background: #4299e1;
+            color: white;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
+        }
         .server-list {
             display: grid;
             gap: 20px;
@@ -431,7 +515,7 @@ create_web_interface() {
         .server-card.stopped { border-left-color: #e53e3e; }
         .server-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 10px;
         }
@@ -464,6 +548,28 @@ create_web_interface() {
         .btn-stop { background: #e53e3e; color: white; }
         .btn-restart { background: #ed8936; color: white; }
         .btn-delete { background: #a0aec0; color: white; }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        .form-group input, .form-group select {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        .btn-primary {
+            background: #4299e1;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
@@ -473,18 +579,78 @@ create_web_interface() {
             <p>Zarządzanie serwerami gry w czasie rzeczywistym</p>
         </div>
 
-        <div class="server-list" id="serverList">
-            <p>Ładowanie serwerów...</p>
+        <div class="tabs">
+            <div class="tab active" onclick="showTab('servers')">🎮 Serwery</div>
+            <div class="tab" onclick="showTab('create')">➕ Nowy Serwer</div>
+            <div class="tab" onclick="showTab('stats')">📊 Statystyki</div>
         </div>
 
-        <div style="text-align: center; margin-top: 30px;">
-            <button onclick="refreshServers()" style="padding: 10px 20px; background: #4299e1; color: white; border: none; border-radius: 5px; cursor: pointer;">
-                🔄 Odśwież
-            </button>
+        <div id="servers-tab" class="tab-content active">
+            <div class="server-list" id="serverList">
+                <p>Ładowanie serwerów...</p>
+            </div>
+            <div style="text-align: center;">
+                <button class="btn-primary" onclick="refreshServers()">🔄 Odśwież</button>
+            </div>
+        </div>
+
+        <div id="create-tab" class="tab-content">
+            <h3>➕ Tworzenie Nowego Serwera</h3>
+            <form id="createServerForm">
+                <div class="form-group">
+                    <label for="serverName">Nazwa serwera:</label>
+                    <input type="text" id="serverName" required placeholder="np. Mój Serwer Minecraft">
+                </div>
+                <div class="form-group">
+                    <label for="serverType">Typ serwera:</label>
+                    <select id="serverType" required>
+                        <option value="minecraft">🎮 Minecraft</option>
+                        <option value="rust">🦀 Rust</option>
+                        <option value="ark">🦖 ARK: Survival Evolved</option>
+                        <option value="csgo">🔫 CS:GO</option>
+                        <option value="teamspeak">🎤 TeamSpeak</option>
+                        <option value="custom">⚙️ Inny</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="serverPort">Port serwera:</label>
+                    <input type="number" id="serverPort" placeholder="25565" min="1000" max="65535">
+                </div>
+                <div class="form-group">
+                    <label for="serverMemory">Pamięć RAM (MB):</label>
+                    <input type="number" id="serverMemory" placeholder="1024" min="512" max="16384">
+                </div>
+                <div class="form-group">
+                    <label for="serverOwner">Właściciel:</label>
+                    <input type="text" id="serverOwner" placeholder="admin" value="admin">
+                </div>
+                <button type="submit" class="btn-primary">🚀 Utwórz Serwer</button>
+            </form>
+        </div>
+
+        <div id="stats-tab" class="tab-content">
+            <h3>📊 Statystyki Systemu</h3>
+            <div id="systemStats">
+                <p>Ładowanie statystyk...</p>
+            </div>
         </div>
     </div>
 
     <script>
+        function showTab(tabName) {
+            // Ukryj wszystkie zakładki
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+
+            // Pokaż wybraną zakładkę
+            document.getElementById(tabName + '-tab').classList.add('active');
+            event.target.classList.add('active');
+        }
+
         async function refreshServers() {
             try {
                 const response = await fetch('/api/servers');
@@ -492,6 +658,11 @@ create_web_interface() {
                 
                 const container = document.getElementById('serverList');
                 container.innerHTML = '';
+                
+                if (servers.length === 0) {
+                    container.innerHTML = '<p>📭 Brak serwerów. Utwórz pierwszy serwer!</p>';
+                    return;
+                }
                 
                 servers.forEach(server => {
                     const statusClass = server.status === 'running' ? 'running' : 'stopped';
@@ -552,6 +723,41 @@ create_web_interface() {
             }
         }
 
+        // Formularz tworzenia serwera
+        document.getElementById('createServerForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const formData = new FormData(this);
+            const data = {
+                name: document.getElementById('serverName').value,
+                type: document.getElementById('serverType').value,
+                port: document.getElementById('serverPort').value || '25565',
+                memory: document.getElementById('serverMemory').value || '1024',
+                owner: document.getElementById('serverOwner').value || 'admin'
+            };
+
+            try {
+                const response = await fetch('/api/server/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(data)
+                });
+                
+                const result = await response.json();
+                alert(result.message);
+                
+                if (result.success) {
+                    this.reset();
+                    showTab('servers');
+                    refreshServers();
+                }
+            } catch (error) {
+                alert('❌ Błąd podczas tworzenia serwera: ' + error);
+            }
+        });
+
         // Odśwież przy starcie i co 30 sekund
         refreshServers();
         setInterval(refreshServers, 30000);
@@ -582,14 +788,13 @@ HTML
 </html>
 STATUS
 
-    # Proste API
-    mkdir -p "$WEB_DIR/api"
-    
-    # Skrypt API w Pythonie
-    cat > "$WEB_DIR/api/server.py" << 'PYTHON'
+    # API do tworzenia serwerów
+    cat > "$WEB_DIR/api.py" << 'PYTHON'
 #!/usr/bin/env python3
 import json
 import os
+import cgi
+import sys
 import subprocess
 
 SERVERS_DIR = "/home/panel/servers"
@@ -620,14 +825,99 @@ def get_servers():
     
     return servers
 
-if __name__ == "__main__":
+def handle_create_server(data):
+    try:
+        name = data.get('name', '')
+        server_type = data.get('type', 'minecraft')
+        port = data.get('port', '25565')
+        memory = data.get('memory', '1024')
+        owner = data.get('owner', 'admin')
+        
+        # Wywołaj funkcję bash do tworzenia serwera
+        cmd = f'bash -c "source /home/panel/panel.sh; create_server \\"{name}\\" \\"{server_type}\\" \\"{port}\\" \\"{memory}\\" \\"{owner}\\""'
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if "SUCCESS" in result.stdout:
+            return {'success': True, 'message': result.stdout.split('SUCCESS: ')[1].strip()}
+        else:
+            return {'success': False, 'message': result.stderr or result.stdout}
+            
+    except Exception as e:
+        return {'success': False, 'message': str(e)}
+
+def handle_server_action(server_id, action):
+    try:
+        if action == 'start':
+            cmd = f'bash -c "source /home/panel/panel.sh; start_server \\"{server_id}\\""'
+        elif action == 'stop':
+            cmd = f'bash -c "source /home/panel/panel.sh; stop_server \\"{server_id}\\""'
+        elif action == 'restart':
+            cmd = f'bash -c "source /home/panel/panel.sh; restart_server \\"{server_id}\\""'
+        elif action == 'delete':
+            cmd = f'bash -c "source /home/panel/panel.sh; delete_server \\"{server_id}\\""'
+        else:
+            return {'success': False, 'message': 'Nieznana akcja'}
+        
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        
+        if "SUCCESS" in result.stdout or "WARNING" in result.stdout:
+            message = result.stdout.split(': ')[1].strip() if ': ' in result.stdout else result.stdout.strip()
+            return {'success': True, 'message': message}
+        else:
+            return {'success': False, 'message': result.stderr or result.stdout}
+            
+    except Exception as e:
+        return {'success': False, 'message': str(e)}
+
+def main():
     print("Content-Type: application/json\n")
-    print(json.dumps(get_servers()))
+    
+    try:
+        if os.environ.get('REQUEST_METHOD') == 'GET':
+            if os.environ.get('PATH_INFO') == '/api/servers':
+                servers = get_servers()
+                print(json.dumps(servers))
+                
+        elif os.environ.get('REQUEST_METHOD') == 'POST':
+            content_length = int(os.environ.get('CONTENT_LENGTH', 0))
+            post_data = sys.stdin.read(content_length)
+            
+            if os.environ.get('PATH_INFO', '').startswith('/api/server/'):
+                path_parts = os.environ['PATH_INFO'].split('/')
+                if len(path_parts) >= 5:
+                    server_id = path_parts[3]
+                    action = path_parts[4]
+                    
+                    if action == 'create':
+                        data = json.loads(post_data)
+                        result = handle_create_server(data)
+                        print(json.dumps(result))
+                    else:
+                        result = handle_server_action(server_id, action)
+                        print(json.dumps(result))
+                        
+    except Exception as e:
+        print(json.dumps({'success': False, 'message': str(e)}))
+
+if __name__ == "__main__":
+    main()
 PYTHON
 
-    chmod +x "$WEB_DIR/api/server.py"
+    chmod +x "$WEB_DIR/api.py"
     
-    echo -e "${GREEN}✅ Interfejs web utworzony${NC}"
+    # Skrypt do obsługi API przez CGI
+    cat > "$WEB_DIR/api" << 'CGI'
+#!/bin/bash
+echo "Content-Type: application/json"
+echo ""
+
+# Przekaż żądanie do skryptu Python
+/home/panel/web/api.py
+CGI
+
+    chmod +x "$WEB_DIR/api"
+    
+    echo -e "${GREEN}✅ Interfejs web z tworzeniem serwerów utworzony${NC}"
 }
 
 # =============================================
@@ -668,46 +958,6 @@ show_system_stats() {
     echo -e "${CYAN}================================${NC}"
 }
 
-create_backup() {
-    local id=$1
-    local dir="$SERVERS_DIR/$id"
-    
-    if [ ! -d "$dir" ]; then
-        error "Serwer '$id' nie istnieje!"
-        return 1
-    fi
-    
-    source "$dir/server.conf"
-    
-    local backup_name="${id}-backup-$(date '+%Y%m%d-%H%M%S')"
-    local backup_file="$BACKUPS_DIR/$backup_name.tar.gz"
-    
-    echo -e "${YELLOW}📦 Tworzenie backupu serwera '$NAME'...${NC}"
-    
-    # Zatrzymaj serwer jeśli działa
-    local was_running=false
-    if [ "$STATUS" = "running" ]; then
-        was_running=true
-        stop_server "$id"
-        sleep 2
-    fi
-    
-    # Utwórz backup
-    tar -czf "$backup_file" -C "$SERVERS_DIR" "$id" 2>/dev/null
-    
-    # Uruchom ponownie jeśli był uruchomiony
-    if [ "$was_running" = true ]; then
-        start_server "$id"
-    fi
-    
-    if [ -f "$backup_file" ]; then
-        log "Utworzono backup: $backup_name"
-        echo -e "${GREEN}✅ Backup utworzony: $backup_file${NC}"
-    else
-        error "Błąd podczas tworzenia backupu!"
-    fi
-}
-
 # =============================================
 # 🎯 MENU GŁÓWNE
 # =============================================
@@ -726,11 +976,10 @@ show_menu() {
     echo -e "║  ${YELLOW}6${GREEN}️⃣  - Usuń serwer                 ║"
     echo -e "║  ${YELLOW}7${GREEN}️⃣  - Panel web                   ║"
     echo -e "║  ${YELLOW}8${GREEN}️⃣  - Statystyki                  ║"
-    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Backup serwera              ║"
     echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                     ║"
     echo -e "║                                      ║"
     echo -e "╠══════════════════════════════════════╣"
-    echo -e "║        Wybierz opcję (0-9):          ║"
+    echo -e "║        Wybierz opcję (0-8):          ║"
     echo -e "╚══════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -770,6 +1019,12 @@ echo -e "${CYAN}Katalog panelu: $PANEL_DIR${NC}"
 echo -e "${CYAN}Logi: $LOGS_DIR/panel.log${NC}"
 echo ""
 
+# Sprawdź czy funkcja create_server jest wywołana z parametrami
+if [ $# -ge 5 ]; then
+    create_server "$1" "$2" "$3" "$4" "$5"
+    exit $?
+fi
+
 while true; do
     show_menu
     read -p "Twój wybór: " choice
@@ -779,7 +1034,14 @@ while true; do
             list_servers
             ;;
         2)
-            create_server
+            echo ""
+            echo -e "${BLUE}🎮 TWORZENIE SERWERA${NC}"
+            read -p "Nazwa serwera: " name
+            read -p "Typ (minecraft/rust/ark/csgo/teamspeak): " type
+            read -p "Port: " port
+            read -p "RAM (MB): " memory
+            read -p "Właściciel: " owner
+            create_server "$name" "$type" "$port" "$memory" "$owner"
             ;;
         3)
             read -p "ID serwera do uruchomienia: " id
@@ -802,10 +1064,6 @@ while true; do
             ;;
         8)
             show_system_stats
-            ;;
-        9)
-            read -p "ID serwera do backupu: " id
-            create_backup "$id"
             ;;
         0)
             cleanup
