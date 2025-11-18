@@ -46,7 +46,9 @@ setup_directories() {
 }
 
 check_dependencies() {
+    echo -e "${YELLOW}🔍 Sprawdzanie zależności...${NC}"
     local missing=()
+    
     for cmd in nc screen java python3 curl; do
         if ! command -v $cmd &> /dev/null; then
             missing+=("$cmd")
@@ -55,9 +57,37 @@ check_dependencies() {
     
     if [ ${#missing[@]} -gt 0 ]; then
         warning "Brakujące zależności: ${missing[*]}"
-        echo "Instalowanie..."
+        echo -e "${YELLOW}📦 Instalowanie brakujących pakietów...${NC}"
         apt update > /dev/null 2>&1
-        apt install -y netcat-openbsd screen default-jre python3 curl > /dev/null 2>&1
+        
+        for pkg in "${missing[@]}"; do
+            case $pkg in
+                nc)
+                    echo -e "${CYAN}Instalowanie: netcat-openbsd${NC}"
+                    apt install -y netcat-openbsd > /dev/null 2>&1
+                    ;;
+                screen)
+                    echo -e "${CYAN}Instalowanie: screen${NC}"
+                    apt install -y screen > /dev/null 2>&1
+                    ;;
+                java)
+                    echo -e "${CYAN}Instalowanie: default-jre${NC}"
+                    apt install -y default-jre > /dev/null 2>&1
+                    ;;
+                python3)
+                    echo -e "${CYAN}Instalowanie: python3${NC}"
+                    apt install -y python3 > /dev/null 2>&1
+                    ;;
+                curl)
+                    echo -e "${CYAN}Instalowanie: curl${NC}"
+                    apt install -y curl > /dev/null 2>&1
+                    ;;
+            esac
+        done
+        
+        echo -e "${GREEN}✅ Zależności zainstalowane${NC}"
+    else
+        echo -e "${GREEN}✅ Wszystkie zależności są dostępne${NC}"
     fi
 }
 
@@ -404,8 +434,41 @@ list_servers() {
     done
 }
 
+get_server_info() {
+    local id=$1
+    local dir="$SERVERS_DIR/$id"
+    
+    if [ ! -f "$dir/server.conf" ]; then
+        return 1
+    fi
+    
+    source "$dir/server.conf"
+    echo "{\"id\":\"$ID\",\"name\":\"$NAME\",\"type\":\"$TYPE\",\"port\":\"$PORT\",\"memory\":\"$MEMORY\",\"owner\":\"$OWNER\",\"status\":\"$STATUS\"}"
+}
+
+get_all_servers() {
+    local servers="["
+    local first=true
+    
+    for server_dir in "$SERVERS_DIR"/*; do
+        if [ -f "$server_dir/server.conf" ]; then
+            source "$server_dir/server.conf"
+            
+            if [ "$first" = false ]; then
+                servers+=","
+            fi
+            
+            servers+="{\"id\":\"$ID\",\"name\":\"$NAME\",\"type\":\"$TYPE\",\"port\":\"$PORT\",\"memory\":\"$MEMORY\",\"owner\":\"$OWNER\",\"status\":\"$STATUS\"}"
+            first=false
+        fi
+    done
+    
+    servers+="]"
+    echo "$servers"
+}
+
 # =============================================
-# 🌐 PANEL WEB Z TWORZENIEM SERWERÓW
+# 🌐 PANEL WEB Z POPRAWIONYM API
 # =============================================
 
 start_web_panel() {
@@ -419,25 +482,105 @@ start_web_panel() {
     # Uruchom serwer web z obsługą CGI
     cd "$WEB_DIR"
     python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
-    echo $! > "$WEB_PID_FILE"
+    local web_pid=$!
+    echo $web_pid > "$WEB_PID_FILE"
     
     local ip=$(hostname -I | awk '{print $1}')
     
-    log "Panel web uruchomiony na porcie $PORT"
+    log "Panel web uruchomiony na porcie $PORT (PID: $web_pid)"
     echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
     echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
     echo -e "   Local:    http://localhost:$PORT"
     echo -e "   Sieć:     http://$ip:$PORT"
     echo -e "   Status:   http://localhost:$PORT/status"
+    
+    # Uruchom serwer API w tle
+    start_api_server &
+    local api_pid=$!
+    echo $api_pid >> "$WEB_PID_FILE"
+    echo -e "${GREEN}✅ Serwer API uruchomiony (PID: $api_pid)${NC}"
 }
 
 stop_web_panel() {
     if [ -f "$WEB_PID_FILE" ]; then
-        local pid=$(cat "$WEB_PID_FILE")
-        kill "$pid" 2>/dev/null
+        while read pid; do
+            if ps -p $pid > /dev/null 2>&1; then
+                kill $pid 2>/dev/null
+            fi
+        done < "$WEB_PID_FILE"
         rm -f "$WEB_PID_FILE"
     fi
+    
     pkill -f "python3 -m http.server" 2>/dev/null
+    pkill -f "api_server" 2>/dev/null
+}
+
+start_api_server() {
+    # Prosty serwer API w bashu
+    while true; do
+        nc -l -p 8081 -c "
+            read -r request
+            method=\$(echo \"\$request\" | awk '{print \$1}')
+            path=\$(echo \"\$request\" | awk '{print \$2}')
+            
+            echo 'HTTP/1.1 200 OK'
+            echo 'Content-Type: application/json'
+            echo 'Access-Control-Allow-Origin: *'
+            echo 'Access-Control-Allow-Methods: GET, POST, OPTIONS'
+            echo 'Access-Control-Allow-Headers: Content-Type'
+            echo ''
+            
+            if [ \"\$method\" = \"OPTIONS\" ]; then
+                echo '{\"status\":\"ok\"}'
+            elif [ \"\$path\" = \"/api/servers\" ] && [ \"\$method\" = \"GET\" ]; then
+                get_all_servers
+            elif echo \"\$path\" | grep -q \"^/api/server/\"; then
+                # Parsuj ścieżkę /api/server/{id}/{action}
+                server_id=\$(echo \"\$path\" | cut -d'/' -f4)
+                action=\$(echo \"\$path\" | cut -d'/' -f5)
+                
+                if [ \"\$method\" = \"POST\" ]; then
+                    if [ \"\$action\" = \"create\" ]; then
+                        # Czytaj dane POST
+                        while read -r line; do
+                            [ -z \"\$line\" ] && break
+                        done
+                        read -r post_data
+                        
+                        # Parsuj JSON (prosty sposób)
+                        name=\$(echo \"\$post_data\" | grep -o '\"name\":\"[^\"]*' | cut -d'\"' -f4)
+                        type=\$(echo \"\$post_data\" | grep -o '\"type\":\"[^\"]*' | cut -d'\"' -f4)
+                        port=\$(echo \"\$post_data\" | grep -o '\"port\":\"[^\"]*' | cut -d'\"' -f4)
+                        memory=\$(echo \"\$post_data\" | grep -o '\"memory\":\"[^\"]*' | cut -d'\"' -f4)
+                        owner=\$(echo \"\$post_data\" | grep -o '\"owner\":\"[^\"]*' | cut -d'\"' -f4)
+                        
+                        result=\$(create_server \"\$name\" \"\$type\" \"\$port\" \"\$memory\" \"\$owner\" 2>&1)
+                        if echo \"\$result\" | grep -q \"SUCCESS\"; then
+                            echo '{\"success\":true,\"message\":\"'\"\$(echo \"\$result\" | cut -d':' -f2- | sed 's/\"/\\\\\"/g')\"'\"}'
+                        else
+                            echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
+                        fi
+                    else
+                        result=\$(case \"\$action\" in
+                            \"start\") start_server \"\$server_id\" 2>&1 ;;
+                            \"stop\") stop_server \"\$server_id\" 2>&1 ;;
+                            \"restart\") restart_server \"\$server_id\" 2>&1 ;;
+                            \"delete\") delete_server \"\$server_id\" 2>&1 ;;
+                            *) echo \"ERROR: Nieznana akcja\" ;;
+                        esac)
+                        
+                        if echo \"\$result\" | grep -q \"SUCCESS\\|WARNING\"; then
+                            echo '{\"success\":true,\"message\":\"'\"\$(echo \"\$result\" | cut -d':' -f2- | sed 's/\"/\\\\\"/g')\"'\"}'
+                        else
+                            echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
+                        fi
+                    fi
+                fi
+            else
+                echo '{\"error\":\"Endpoint not found\"}'
+            fi
+        " 2>/dev/null
+    done
 }
 
 create_web_interface() {
@@ -570,6 +713,9 @@ create_web_interface() {
             border-radius: 5px;
             cursor: pointer;
         }
+        .loading { color: #666; text-align: center; padding: 20px; }
+        .error { color: #e53e3e; background: #fed7d7; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .success { color: #276749; background: #c6f6d5; padding: 10px; border-radius: 5px; margin: 10px 0; }
     </style>
 </head>
 <body>
@@ -587,7 +733,7 @@ create_web_interface() {
 
         <div id="servers-tab" class="tab-content active">
             <div class="server-list" id="serverList">
-                <p>Ładowanie serwerów...</p>
+                <div class="loading">🔄 Ładowanie serwerów...</div>
             </div>
             <div style="text-align: center;">
                 <button class="btn-primary" onclick="refreshServers()">🔄 Odśwież</button>
@@ -626,17 +772,20 @@ create_web_interface() {
                 </div>
                 <button type="submit" class="btn-primary">🚀 Utwórz Serwer</button>
             </form>
+            <div id="formResult"></div>
         </div>
 
         <div id="stats-tab" class="tab-content">
             <h3>📊 Statystyki Systemu</h3>
             <div id="systemStats">
-                <p>Ładowanie statystyk...</p>
+                <div class="loading">Ładowanie statystyk...</div>
             </div>
         </div>
     </div>
 
     <script>
+        const API_BASE = 'http://localhost:8081';
+        
         function showTab(tabName) {
             // Ukryj wszystkie zakładki
             document.querySelectorAll('.tab-content').forEach(tab => {
@@ -649,18 +798,50 @@ create_web_interface() {
             // Pokaż wybraną zakładkę
             document.getElementById(tabName + '-tab').classList.add('active');
             event.target.classList.add('active');
+            
+            if (tabName === 'servers') {
+                refreshServers();
+            }
+        }
+
+        async function apiCall(endpoint, options = {}) {
+            try {
+                const response = await fetch(API_BASE + endpoint, {
+                    method: options.method || 'GET',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    body: options.body ? JSON.stringify(options.body) : undefined
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                const text = await response.text();
+                if (!text.trim()) {
+                    throw new Error('Empty response from server');
+                }
+                
+                return JSON.parse(text);
+            } catch (error) {
+                console.error('API Call error:', error);
+                throw error;
+            }
         }
 
         async function refreshServers() {
+            const container = document.getElementById('serverList');
+            
             try {
-                const response = await fetch('/api/servers');
-                const servers = await response.json();
+                container.innerHTML = '<div class="loading">🔄 Ładowanie serwerów...</div>';
+                const servers = await apiCall('/api/servers');
                 
-                const container = document.getElementById('serverList');
                 container.innerHTML = '';
                 
                 if (servers.length === 0) {
-                    container.innerHTML = '<p>📭 Brak serwerów. Utwórz pierwszy serwer!</p>';
+                    container.innerHTML = '<div class="loading">📭 Brak serwerów. Utwórz pierwszy serwer!</div>';
                     return;
                 }
                 
@@ -695,30 +876,28 @@ create_web_interface() {
                     `;
                 });
             } catch (error) {
-                document.getElementById('serverList').innerHTML = '<p>❌ Błąd ładowania serwerów</p>';
+                container.innerHTML = '<div class="error">❌ Błąd ładowania serwerów: ' + error.message + '</div>';
             }
         }
 
         async function controlServer(serverId, action) {
             try {
-                const response = await fetch(`/api/server/${serverId}/${action}`, { method: 'POST' });
-                const result = await response.json();
-                alert(result.message);
+                const result = await apiCall(`/api/server/${serverId}/${action}`, { method: 'POST' });
+                showMessage(result.message, result.success);
                 refreshServers();
             } catch (error) {
-                alert('❌ Błąd: ' + error);
+                showMessage('❌ Błąd: ' + error.message, false);
             }
         }
 
         async function deleteServer(serverId) {
             if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
                 try {
-                    const response = await fetch(`/api/server/${serverId}/delete`, { method: 'POST' });
-                    const result = await response.json();
-                    alert(result.message);
+                    const result = await apiCall(`/api/server/${serverId}/delete`, { method: 'POST' });
+                    showMessage(result.message, result.success);
                     refreshServers();
                 } catch (error) {
-                    alert('❌ Błąd: ' + error);
+                    showMessage('❌ Błąd: ' + error.message, false);
                 }
             }
         }
@@ -727,7 +906,13 @@ create_web_interface() {
         document.getElementById('createServerForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
-            const formData = new FormData(this);
+            const formResult = document.getElementById('formResult');
+            const button = this.querySelector('button[type="submit"]');
+            const originalText = button.textContent;
+            
+            button.textContent = '⏳ Tworzenie...';
+            button.disabled = true;
+            
             const data = {
                 name: document.getElementById('serverName').value,
                 type: document.getElementById('serverType').value,
@@ -737,26 +922,39 @@ create_web_interface() {
             };
 
             try {
-                const response = await fetch('/api/server/create', {
+                const result = await apiCall('/api/server/create', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify(data)
+                    body: data
                 });
                 
-                const result = await response.json();
-                alert(result.message);
+                showMessage(result.message, result.success, formResult);
                 
                 if (result.success) {
                     this.reset();
-                    showTab('servers');
-                    refreshServers();
+                    setTimeout(() => showTab('servers'), 1000);
                 }
             } catch (error) {
-                alert('❌ Błąd podczas tworzenia serwera: ' + error);
+                showMessage('❌ Błąd podczas tworzenia serwera: ' + error.message, false, formResult);
+            } finally {
+                button.textContent = originalText;
+                button.disabled = false;
             }
         });
+
+        function showMessage(message, isSuccess, container = null) {
+            const element = container || document.body;
+            const msgDiv = document.createElement('div');
+            msgDiv.className = isSuccess ? 'success' : 'error';
+            msgDiv.textContent = message;
+            
+            if (container) {
+                container.innerHTML = '';
+                container.appendChild(msgDiv);
+            } else {
+                element.appendChild(msgDiv);
+                setTimeout(() => msgDiv.remove(), 5000);
+            }
+        }
 
         // Odśwież przy starcie i co 30 sekund
         refreshServers();
@@ -788,135 +986,6 @@ HTML
 </html>
 STATUS
 
-    # API do tworzenia serwerów
-    cat > "$WEB_DIR/api.py" << 'PYTHON'
-#!/usr/bin/env python3
-import json
-import os
-import cgi
-import sys
-import subprocess
-
-SERVERS_DIR = "/home/panel/servers"
-
-def get_servers():
-    servers = []
-    for server_id in os.listdir(SERVERS_DIR):
-        server_dir = os.path.join(SERVERS_DIR, server_id)
-        conf_file = os.path.join(server_dir, "server.conf")
-        
-        if os.path.isfile(conf_file):
-            with open(conf_file, 'r') as f:
-                config = {}
-                for line in f:
-                    if '=' in line:
-                        key, value = line.strip().split('=', 1)
-                        config[key] = value.strip('"')
-                
-                servers.append({
-                    'id': config.get('ID', ''),
-                    'name': config.get('NAME', ''),
-                    'type': config.get('TYPE', ''),
-                    'port': config.get('PORT', ''),
-                    'memory': config.get('MEMORY', ''),
-                    'owner': config.get('OWNER', ''),
-                    'status': config.get('STATUS', 'stopped')
-                })
-    
-    return servers
-
-def handle_create_server(data):
-    try:
-        name = data.get('name', '')
-        server_type = data.get('type', 'minecraft')
-        port = data.get('port', '25565')
-        memory = data.get('memory', '1024')
-        owner = data.get('owner', 'admin')
-        
-        # Wywołaj funkcję bash do tworzenia serwera
-        cmd = f'bash -c "source /home/panel/panel.sh; create_server \\"{name}\\" \\"{server_type}\\" \\"{port}\\" \\"{memory}\\" \\"{owner}\\""'
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        
-        if "SUCCESS" in result.stdout:
-            return {'success': True, 'message': result.stdout.split('SUCCESS: ')[1].strip()}
-        else:
-            return {'success': False, 'message': result.stderr or result.stdout}
-            
-    except Exception as e:
-        return {'success': False, 'message': str(e)}
-
-def handle_server_action(server_id, action):
-    try:
-        if action == 'start':
-            cmd = f'bash -c "source /home/panel/panel.sh; start_server \\"{server_id}\\""'
-        elif action == 'stop':
-            cmd = f'bash -c "source /home/panel/panel.sh; stop_server \\"{server_id}\\""'
-        elif action == 'restart':
-            cmd = f'bash -c "source /home/panel/panel.sh; restart_server \\"{server_id}\\""'
-        elif action == 'delete':
-            cmd = f'bash -c "source /home/panel/panel.sh; delete_server \\"{server_id}\\""'
-        else:
-            return {'success': False, 'message': 'Nieznana akcja'}
-        
-        result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-        
-        if "SUCCESS" in result.stdout or "WARNING" in result.stdout:
-            message = result.stdout.split(': ')[1].strip() if ': ' in result.stdout else result.stdout.strip()
-            return {'success': True, 'message': message}
-        else:
-            return {'success': False, 'message': result.stderr or result.stdout}
-            
-    except Exception as e:
-        return {'success': False, 'message': str(e)}
-
-def main():
-    print("Content-Type: application/json\n")
-    
-    try:
-        if os.environ.get('REQUEST_METHOD') == 'GET':
-            if os.environ.get('PATH_INFO') == '/api/servers':
-                servers = get_servers()
-                print(json.dumps(servers))
-                
-        elif os.environ.get('REQUEST_METHOD') == 'POST':
-            content_length = int(os.environ.get('CONTENT_LENGTH', 0))
-            post_data = sys.stdin.read(content_length)
-            
-            if os.environ.get('PATH_INFO', '').startswith('/api/server/'):
-                path_parts = os.environ['PATH_INFO'].split('/')
-                if len(path_parts) >= 5:
-                    server_id = path_parts[3]
-                    action = path_parts[4]
-                    
-                    if action == 'create':
-                        data = json.loads(post_data)
-                        result = handle_create_server(data)
-                        print(json.dumps(result))
-                    else:
-                        result = handle_server_action(server_id, action)
-                        print(json.dumps(result))
-                        
-    except Exception as e:
-        print(json.dumps({'success': False, 'message': str(e)}))
-
-if __name__ == "__main__":
-    main()
-PYTHON
-
-    chmod +x "$WEB_DIR/api.py"
-    
-    # Skrypt do obsługi API przez CGI
-    cat > "$WEB_DIR/api" << 'CGI'
-#!/bin/bash
-echo "Content-Type: application/json"
-echo ""
-
-# Przekaż żądanie do skryptu Python
-/home/panel/web/api.py
-CGI
-
-    chmod +x "$WEB_DIR/api"
-    
     echo -e "${GREEN}✅ Interfejs web z tworzeniem serwerów utworzony${NC}"
 }
 
