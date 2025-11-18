@@ -434,29 +434,8 @@ list_servers() {
     done
 }
 
-get_all_servers() {
-    local servers="["
-    local first=true
-    
-    for server_dir in "$SERVERS_DIR"/*; do
-        if [ -f "$server_dir/server.conf" ]; then
-            source "$server_dir/server.conf"
-            
-            if [ "$first" = false ]; then
-                servers+=","
-            fi
-            
-            servers+="{\"id\":\"$ID\",\"name\":\"$NAME\",\"type\":\"$TYPE\",\"port\":\"$PORT\",\"memory\":\"$MEMORY\",\"owner\":\"$OWNER\",\"status\":\"$STATUS\"}"
-            first=false
-        fi
-    done
-    
-    servers+="]"
-    echo "$servers"
-}
-
 # =============================================
-# 🌐 TWORZENIE PANELU WEB
+# 🌐 TWORZENIE I URUCHAMIANIE PANELU WEB
 # =============================================
 
 create_web_panel() {
@@ -497,29 +476,6 @@ create_web_panel() {
             font-size: 2.5em; 
             color: #2d3748;
             margin-bottom: 10px;
-        }
-        .tabs {
-            display: flex;
-            margin-bottom: 20px;
-            border-bottom: 1px solid #ddd;
-        }
-        .tab {
-            padding: 10px 20px;
-            cursor: pointer;
-            border: 1px solid transparent;
-            border-bottom: none;
-            margin-right: 5px;
-            border-radius: 5px 5px 0 0;
-        }
-        .tab.active {
-            background: #4299e1;
-            color: white;
-        }
-        .tab-content {
-            display: none;
-        }
-        .tab-content.active {
-            display: block;
         }
         .server-list {
             display: grid;
@@ -594,6 +550,13 @@ create_web_panel() {
         .loading { color: #666; text-align: center; padding: 20px; }
         .error { color: #e53e3e; background: #fed7d7; padding: 10px; border-radius: 5px; margin: 10px 0; }
         .success { color: #276749; background: #c6f6d5; padding: 10px; border-radius: 5px; margin: 10px 0; }
+        .info-box {
+            background: #e3f2fd;
+            border: 1px solid #90caf9;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
     </style>
 </head>
 <body>
@@ -603,107 +566,65 @@ create_web_panel() {
             <p>Zarządzanie serwerami gry w czasie rzeczywistym</p>
         </div>
 
-        <div class="tabs">
-            <div class="tab active" onclick="showTab('servers')">🎮 Serwery</div>
-            <div class="tab" onclick="showTab('create')">➕ Nowy Serwer</div>
-            <div class="tab" onclick="showTab('help')">❓ Pomoc</div>
+        <div class="info-box">
+            <h3>🚀 Panel został uruchomiony pomyślnie!</h3>
+            <p>Teraz możesz zarządzać serwerami przez przeglądarkę.</p>
         </div>
 
-        <div id="servers-tab" class="tab-content active">
-            <div class="server-list" id="serverList">
-                <div class="loading">🔄 Ładowanie serwerów...</div>
-            </div>
-            <div style="text-align: center;">
-                <button class="btn-primary" onclick="refreshServers()">🔄 Odśwież</button>
-            </div>
+        <h2>🎮 Twoje Serwery</h2>
+        <div class="server-list" id="serverList">
+            <div class="loading">🔄 Ładowanie serwerów...</div>
         </div>
 
-        <div id="create-tab" class="tab-content">
-            <h3>➕ Tworzenie Nowego Serwera</h3>
-            <form id="createServerForm">
-                <div class="form-group">
-                    <label for="serverName">Nazwa serwera:</label>
-                    <input type="text" id="serverName" required placeholder="np. Mój Serwer Minecraft">
-                </div>
-                <div class="form-group">
-                    <label for="serverType">Typ serwera:</label>
-                    <select id="serverType" required>
-                        <option value="minecraft">🎮 Minecraft</option>
-                        <option value="rust">🦀 Rust</option>
-                        <option value="ark">🦖 ARK: Survival Evolved</option>
-                        <option value="csgo">🔫 CS:GO</option>
-                        <option value="teamspeak">🎤 TeamSpeak</option>
-                        <option value="custom">⚙️ Inny</option>
-                    </select>
-                </div>
-                <div class="form-group">
-                    <label for="serverPort">Port serwera:</label>
-                    <input type="number" id="serverPort" placeholder="25565" min="1000" max="65535">
-                </div>
-                <div class="form-group">
-                    <label for="serverMemory">Pamięć RAM (MB):</label>
-                    <input type="number" id="serverMemory" placeholder="1024" min="512" max="16384">
-                </div>
-                <div class="form-group">
-                    <label for="serverOwner">Właściciel:</label>
-                    <input type="text" id="serverOwner" placeholder="admin" value="admin">
-                </div>
-                <button type="submit" class="btn-primary">🚀 Utwórz Serwer</button>
-            </form>
-            <div id="formResult"></div>
-        </div>
-
-        <div id="help-tab" class="tab-content">
-            <h3>❓ Pomoc - Jak używać panelu</h3>
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 10px;">
-                <h4>🎮 Zarządzanie serwerami:</h4>
-                <ul style="margin: 10px 0 20px 20px;">
-                    <li><strong>Start</strong> - uruchamia wybrany serwer</li>
-                    <li><strong>Stop</strong> - zatrzymuje działający serwer</li>
-                    <li><strong>Restart</strong> - restartuje serwer</li>
-                    <li><strong>Usuń</strong> - trwale usuwa serwer</li>
-                </ul>
-                
-                <h4>➕ Tworzenie serwera:</h4>
-                <ul style="margin: 10px 0 20px 20px;">
-                    <li><strong>Minecraft</strong> - automatycznie pobiera serwer</li>
-                    <li><strong>Rust/ARK/CS:GO</strong> - wymagają ręcznej instalacji</li>
-                    <li><strong>Port</strong> - musi być unikalny dla każdego serwera</li>
-                    <li><strong>RAM</strong> - pamięć przydzielona serwerowi</li>
-                </ul>
-                
-                <h4>🌐 Adresy dostępu:</h4>
-                <p>Po utworzeniu serwera możesz się do niego podłączyć pod adresem:</p>
-                <code style="background: #2d3748; color: white; padding: 5px 10px; border-radius: 3px; display: block; margin: 10px 0;">
-                    twoj-adres:PORT
-                </code>
+        <h2>➕ Utwórz Nowy Serwer</h2>
+        <form id="createServerForm">
+            <div class="form-group">
+                <label for="serverName">Nazwa serwera:</label>
+                <input type="text" id="serverName" required placeholder="np. Mój Serwer Minecraft">
             </div>
+            <div class="form-group">
+                <label for="serverType">Typ serwera:</label>
+                <select id="serverType" required>
+                    <option value="minecraft">🎮 Minecraft</option>
+                    <option value="rust">🦀 Rust</option>
+                    <option value="ark">🦖 ARK: Survival Evolved</option>
+                    <option value="csgo">🔫 CS:GO</option>
+                    <option value="teamspeak">🎤 TeamSpeak</option>
+                    <option value="custom">⚙️ Inny</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label for="serverPort">Port serwera:</label>
+                <input type="number" id="serverPort" placeholder="25565" min="1000" max="65535">
+            </div>
+            <div class="form-group">
+                <label for="serverMemory">Pamięć RAM (MB):</label>
+                <input type="number" id="serverMemory" placeholder="1024" min="512" max="16384">
+            </div>
+            <div class="form-group">
+                <label for="serverOwner">Właściciel:</label>
+                <input type="text" id="serverOwner" placeholder="admin" value="admin">
+            </div>
+            <button type="submit" class="btn-primary">🚀 Utwórz Serwer</button>
+        </form>
+        <div id="formResult"></div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <button class="btn-primary" onclick="refreshServers()">🔄 Odśwież Listę Serwerów</button>
         </div>
     </div>
 
     <script>
-        function showTab(tabName) {
-            document.querySelectorAll('.tab-content').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-
-            document.getElementById(tabName + '-tab').classList.add('active');
-            event.target.classList.add('active');
-        }
-
         function refreshServers() {
             const container = document.getElementById('serverList');
             container.innerHTML = '<div class="loading">🔄 Ładowanie serwerów...</div>';
             
-            // Symulacja danych - w prawdziwej wersji tutaj będzie API
+            // Symulacja ładowania danych
             setTimeout(() => {
                 const servers = [
                     {
                         id: 'test-minecraft',
-                        name: 'Testowy Minecraft',
+                        name: 'Testowy Serwer Minecraft',
                         type: 'minecraft',
                         port: '25565',
                         memory: '1024',
@@ -712,7 +633,7 @@ create_web_panel() {
                     },
                     {
                         id: 'test-rust',
-                        name: 'Testowy Rust',
+                        name: 'Testowy Serwer Rust',
                         type: 'rust',
                         port: '28015',
                         memory: '2048',
@@ -768,12 +689,12 @@ create_web_panel() {
         }
 
         function controlServer(serverId, action) {
-            showMessage(`Funkcja ${action} dla serwera ${serverId} - w prawdziwej wersji połączy się z API`, true);
+            showMessage(`Funkcja ${action} dla serwera ${serverId} - w pełnej wersji połączy się z backendem`, true);
         }
 
         function deleteServer(serverId) {
             if (confirm('Czy na pewno chcesz usunąć ten serwer?')) {
-                showMessage(`Serwer ${serverId} został usunięty - w prawdziwej wersji połączy się z API`, true);
+                showMessage(`Serwer ${serverId} został usunięty - w pełnej wersji połączy się z backendem`, true);
                 refreshServers();
             }
         }
@@ -798,11 +719,10 @@ create_web_panel() {
 
             // Symulacja tworzenia serwera
             setTimeout(() => {
-                showMessage(`Serwer "${data.name}" został utworzony! - w prawdziwej wersji połączy się z API`, true, formResult);
+                showMessage(`✅ Serwer "${data.name}" został utworzony pomyślnie! (w pełnej wersji połączy się z backendem)`, true, formResult);
                 this.reset();
                 button.textContent = originalText;
                 button.disabled = false;
-                showTab('servers');
                 refreshServers();
             }, 2000);
         });
@@ -866,14 +786,10 @@ STATUS
     echo -e "${CYAN}📁 Pliki znajdują się w: $WEB_DIR/${NC}"
 }
 
-# =============================================
-# 🌐 URUCHAMIANIE SERWERA WEB
-# =============================================
-
-start_web_server() {
-    echo -e "${YELLOW}🌐 URUCHAMIANIE SERWERA WEB...${NC}"
+start_web_panel() {
+    echo -e "${YELLOW}🌐 URUCHAMIANIE PANELU WEB...${NC}"
     
-    # Sprawdź czy panel web istnieje
+    # Sprawdź czy panel web istnieje, jeśli nie - utwórz
     if [ ! -f "$WEB_DIR/index.html" ]; then
         echo -e "${YELLOW}📝 Tworzenie panelu web...${NC}"
         create_web_panel
@@ -898,6 +814,7 @@ start_web_server() {
     echo -e "   Status:   http://localhost:$PORT/status"
     echo -e ""
     echo -e "${YELLOW}💡 Otwórz przeglądarkę i wejdź na jeden z powyższych adresów${NC}"
+    echo -e "${GREEN}🚀 Panel web jest gotowy do użycia!${NC}"
 }
 
 stop_web_server() {
@@ -967,9 +884,9 @@ show_menu() {
     echo -e "║  ${YELLOW}4${GREEN}️⃣  - Zatrzymaj serwer            ║"
     echo -e "║  ${YELLOW}5${GREEN}️⃣  - Restartuj serwer            ║"
     echo -e "║  ${YELLOW}6${GREEN}️⃣  - Usuń serwer                 ║"
-    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Utwórz panel web            ║"
-    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Uruchom serwer web          ║"
-    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Zatrzymaj serwer web        ║"
+    echo -e "║  ${YELLOW}7${GREEN}️⃣  - Utwórz i uruchom panel web  ║"
+    echo -e "║  ${YELLOW}8${GREEN}️⃣  - Zatrzymaj panel web         ║"
+    echo -e "║  ${YELLOW}9${GREEN}️⃣  - Statystyki systemu          ║"
     echo -e "║  ${YELLOW}0${GREEN}️⃣  - Wyjście                     ║"
     echo -e "║                                      ║"
     echo -e "╠══════════════════════════════════════╣"
@@ -1048,13 +965,15 @@ while true; do
             delete_server "$id"
             ;;
         7)
+            echo -e "${YELLOW}🚀 Tworzenie i uruchamianie panelu web...${NC}"
             create_web_panel
+            start_web_panel
             ;;
         8)
-            start_web_server
+            stop_web_server
             ;;
         9)
-            stop_web_server
+            show_system_stats
             ;;
         0)
             cleanup
