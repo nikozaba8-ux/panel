@@ -468,7 +468,7 @@ get_all_servers() {
 }
 
 # =============================================
-# 🌐 PANEL WEB Z POPRAWIONYM API
+# 🌐 SERWER HTTP Z API
 # =============================================
 
 start_web_panel() {
@@ -479,50 +479,59 @@ start_web_panel() {
     # Utwórz interfejs web
     create_web_interface
     
-    # Uruchom serwer web z obsługą CGI
-    cd "$WEB_DIR"
-    python3 -m http.server $PORT > "$LOGS_DIR/web.log" 2>&1 &
-    local web_pid=$!
-    echo $web_pid > "$WEB_PID_FILE"
+    # Uruchom serwer HTTP z obsługą API
+    start_http_server &
+    local server_pid=$!
+    echo $server_pid > "$WEB_PID_FILE"
     
     local ip=$(hostname -I | awk '{print $1}')
     
-    log "Panel web uruchomiony na porcie $PORT (PID: $web_pid)"
+    log "Panel web uruchomiony na porcie $PORT (PID: $server_pid)"
     echo -e "${GREEN}✅ Panel web uruchomiony!${NC}"
     echo -e "${CYAN}🌐 Adresy dostępu:${NC}"
     echo -e "   Local:    http://localhost:$PORT"
     echo -e "   Sieć:     http://$ip:$PORT"
     echo -e "   Status:   http://localhost:$PORT/status"
-    
-    # Uruchom serwer API w tle
-    start_api_server &
-    local api_pid=$!
-    echo $api_pid >> "$WEB_PID_FILE"
-    echo -e "${GREEN}✅ Serwer API uruchomiony (PID: $api_pid)${NC}"
 }
 
 stop_web_panel() {
     if [ -f "$WEB_PID_FILE" ]; then
-        while read pid; do
-            if ps -p $pid > /dev/null 2>&1; then
-                kill $pid 2>/dev/null
-            fi
-        done < "$WEB_PID_FILE"
+        local pid=$(cat "$WEB_PID_FILE")
+        if ps -p $pid > /dev/null 2>&1; then
+            kill $pid 2>/dev/null
+        fi
         rm -f "$WEB_PID_FILE"
     fi
     
-    pkill -f "python3 -m http.server" 2>/dev/null
-    pkill -f "api_server" 2>/dev/null
+    pkill -f "http_server" 2>/dev/null
 }
 
-start_api_server() {
-    # Prosty serwer API w bashu
+start_http_server() {
     while true; do
-        nc -l -p 8081 -c "
+        nc -l -p $PORT -c "
             read -r request
             method=\$(echo \"\$request\" | awk '{print \$1}')
             path=\$(echo \"\$request\" | awk '{print \$2}')
             
+            # Pobierz całe żądanie
+            while read -r line; do
+                [ -z \"\$line\" ] && break
+                if echo \"\$line\" | grep -q 'Content-Length'; then
+                    content_length=\$(echo \"\$line\" | awk '{print \$2}')
+                fi
+            done
+            
+            # Pobierz dane POST jeśli istnieją
+            if [ \"\$method\" = \"POST\" ] && [ -n \"\$content_length\" ]; then
+                post_data=\"\"
+                while [ \"\$content_length\" -gt 0 ]; do
+                    read -r -n 1 char
+                    post_data=\"\$post_data\$char\"
+                    content_length=\$((content_length - 1))
+                done
+            fi
+            
+            # Nagłówki odpowiedzi
             echo 'HTTP/1.1 200 OK'
             echo 'Content-Type: application/json'
             echo 'Access-Control-Allow-Origin: *'
@@ -530,24 +539,18 @@ start_api_server() {
             echo 'Access-Control-Allow-Headers: Content-Type'
             echo ''
             
-            if [ \"\$method\" = \"OPTIONS\" ]; then
-                echo '{\"status\":\"ok\"}'
-            elif [ \"\$path\" = \"/api/servers\" ] && [ \"\$method\" = \"GET\" ]; then
-                get_all_servers
-            elif echo \"\$path\" | grep -q \"^/api/server/\"; then
-                # Parsuj ścieżkę /api/server/{id}/{action}
-                server_id=\$(echo \"\$path\" | cut -d'/' -f4)
-                action=\$(echo \"\$path\" | cut -d'/' -f5)
-                
-                if [ \"\$method\" = \"POST\" ]; then
-                    if [ \"\$action\" = \"create\" ]; then
-                        # Czytaj dane POST
-                        while read -r line; do
-                            [ -z \"\$line\" ] && break
-                        done
-                        read -r post_data
-                        
-                        # Parsuj JSON (prosty sposób)
+            # Routing
+            case \"\$path\" in
+                \"/api/servers\")
+                    if [ \"\$method\" = \"GET\" ]; then
+                        get_all_servers
+                    else
+                        echo '{\"error\":\"Method not allowed\"}'
+                    fi
+                    ;;
+                \"/api/server/create\")
+                    if [ \"\$method\" = \"POST\" ]; then
+                        # Parsuj dane JSON
                         name=\$(echo \"\$post_data\" | grep -o '\"name\":\"[^\"]*' | cut -d'\"' -f4)
                         type=\$(echo \"\$post_data\" | grep -o '\"type\":\"[^\"]*' | cut -d'\"' -f4)
                         port=\$(echo \"\$post_data\" | grep -o '\"port\":\"[^\"]*' | cut -d'\"' -f4)
@@ -561,24 +564,61 @@ start_api_server() {
                             echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
                         fi
                     else
-                        result=\$(case \"\$action\" in
-                            \"start\") start_server \"\$server_id\" 2>&1 ;;
-                            \"stop\") stop_server \"\$server_id\" 2>&1 ;;
-                            \"restart\") restart_server \"\$server_id\" 2>&1 ;;
-                            \"delete\") delete_server \"\$server_id\" 2>&1 ;;
-                            *) echo \"ERROR: Nieznana akcja\" ;;
-                        esac)
+                        echo '{\"error\":\"Method not allowed\"}'
+                    fi
+                    ;;
+                \"/api/server/\"*)
+                    # Parsuj ścieżkę /api/server/{id}/{action}
+                    server_id=\$(echo \"\$path\" | cut -d'/' -f4)
+                    action=\$(echo \"\$path\" | cut -d'/' -f5)
+                    
+                    if [ \"\$method\" = \"POST\" ]; then
+                        case \"\$action\" in
+                            \"start\")
+                                result=\$(start_server \"\$server_id\" 2>&1)
+                                ;;
+                            \"stop\")
+                                result=\$(stop_server \"\$server_id\" 2>&1)
+                                ;;
+                            \"restart\")
+                                result=\$(restart_server \"\$server_id\" 2>&1)
+                                ;;
+                            \"delete\")
+                                result=\$(delete_server \"\$server_id\" 2>&1)
+                                ;;
+                            *)
+                                result=\"ERROR: Nieznana akcja\"
+                                ;;
+                        esac
                         
                         if echo \"\$result\" | grep -q \"SUCCESS\\|WARNING\"; then
                             echo '{\"success\":true,\"message\":\"'\"\$(echo \"\$result\" | cut -d':' -f2- | sed 's/\"/\\\\\"/g')\"'\"}'
                         else
                             echo '{\"success\":false,\"message\":\"'\"\$(echo \"\$result\" | sed 's/\"/\\\\\"/g')\"'\"}'
                         fi
+                    else
+                        echo '{\"error\":\"Method not allowed\"}'
                     fi
-                fi
-            else
-                echo '{\"error\":\"Endpoint not found\"}'
-            fi
+                    ;;
+                \"/\"|\"/index.html\")
+                    echo 'HTTP/1.1 200 OK'
+                    echo 'Content-Type: text/html'
+                    echo ''
+                    cat \"$WEB_DIR/index.html\"
+                    ;;
+                \"/status\")
+                    echo 'HTTP/1.1 200 OK'
+                    echo 'Content-Type: text/html'
+                    echo ''
+                    cat \"$WEB_DIR/status.html\"
+                    ;;
+                *)
+                    echo 'HTTP/1.1 200 OK'
+                    echo 'Content-Type: text/html'
+                    echo ''
+                    cat \"$WEB_DIR/index.html\"
+                    ;;
+            esac
         " 2>/dev/null
     done
 }
@@ -784,10 +824,9 @@ create_web_interface() {
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:8081';
+        const API_BASE = '';
         
         function showTab(tabName) {
-            // Ukryj wszystkie zakładki
             document.querySelectorAll('.tab-content').forEach(tab => {
                 tab.classList.remove('active');
             });
@@ -795,7 +834,6 @@ create_web_interface() {
                 tab.classList.remove('active');
             });
 
-            // Pokaż wybraną zakładkę
             document.getElementById(tabName + '-tab').classList.add('active');
             event.target.classList.add('active');
             
@@ -806,7 +844,7 @@ create_web_interface() {
 
         async function apiCall(endpoint, options = {}) {
             try {
-                const response = await fetch(API_BASE + endpoint, {
+                const response = await fetch(endpoint, {
                     method: options.method || 'GET',
                     headers: {
                         'Content-Type': 'application/json',
@@ -902,7 +940,6 @@ create_web_interface() {
             }
         }
 
-        // Formularz tworzenia serwera
         document.getElementById('createServerForm').addEventListener('submit', async function(e) {
             e.preventDefault();
             
@@ -956,7 +993,6 @@ create_web_interface() {
             }
         }
 
-        // Odśwież przy starcie i co 30 sekund
         refreshServers();
         setInterval(refreshServers, 30000);
     </script>
