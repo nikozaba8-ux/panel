@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================
-# 🟣 PURPLEHOST - PRAWDZIWE SERWERY MINECRAFT
+# 🟣 PURPLEHOST - NATYCHMIASTOWE SERWERY MINECRAFT
 # =============================================
 
 # Automatyczne wykrywanie ścieżki
@@ -67,11 +67,11 @@ check_dependencies() {
 }
 
 # =============================================
-# 🐍 BACKEND - NATYCHMIASTOWE WGRYWANIE PLIKÓW
+# 🐍 BACKEND - NATYCHMIASTOWE TWORZENIE PLIKÓW
 # =============================================
 
 create_backend() {
-    echo -e "${PURPLE}🔧 Tworzenie backend API z natychmiastowym wgrywaniem...${NC}"
+    echo -e "${PURPLE}🔧 Tworzenie backend API z natychmiastowym tworzeniem plików...${NC}"
     
     cat > "$WEB_DIR/api.py" << 'PYTHON'
 #!/usr/bin/env python3
@@ -107,58 +107,133 @@ class RealMinecraftServer:
         self.console_callbacks = []
         self.players = []
         self.start_time = None
-        self.files_created = False
         
-    def create_essential_files_instant(self):
-        """Natychmiast tworzy WSZYSTKIE potrzebne pliki"""
+    def create_all_files_instantly(self):
+        """NATYCHMIAST tworzy WSZYSTKIE potrzebne pliki"""
         try:
-            # server.properties - natychmiast
+            # 1. server.properties - NATYCHMIAST
             server_props = f"""# Minecraft Server Properties
+# Created by PurpleHost - Instant Setup
 max-players=20
 server-port={self.port}
+level-seed=
 motd={self.name}
 level-type=default
 online-mode=false
 spawn-protection=0
 view-distance=10
+server-ip=
+allow-nether=true
 enable-command-block=false
+max-world-size=29999984
+resource-pack=
+entity-broadcast-range-percentage=100
+simulation-distance=10
+rcon.port=25575
+rcon.password=
+enable-rcon=false
+enable-query=false
+op-permission-level=4
+prevent-proxy-connections=false
+generator-settings=
+resource-pack-prompt=
+level-name=world
+player-idle-timeout=0
+difficulty=easy
+spawn-monsters=true
+broadcast-rcon-to-ops=true
+spawn-animals=true
+snooper-enabled=true
+function-permission-level=2
+text-filtering-config=
+network-compression-threshold=256
+require-resource-pack=false
+max-tick-time=60000
+use-native-transport=true
+enable-status=true
+allow-flight=false
+broadcast-console-to-ops=true
+max-build-height=256
+enforce-secure-profile=false
+hide-online-players=false
 """
             with open(os.path.join(self.path, "server.properties"), "w") as f:
                 f.write(server_props)
             
-            # eula.txt - natychmiast
+            # 2. eula.txt - NATYCHMIAST
             with open(os.path.join(self.path, "eula.txt"), "w") as f:
+                f.write("#By changing the setting below to TRUE you are indicating your agreement to our EULA (https://aka.ms/MinecraftEULA).\\n")
                 f.write("eula=true\\n")
             
-            # start.sh - natychmiast
+            # 3. start.sh - NATYCHMIAST
             start_script = f"""#!/bin/bash
 cd "{self.path}"
+echo "Starting {self.name} - Minecraft {self.version}"
+echo "RAM: {self.ram} | Port: {self.port}"
 java -Xmx{self.ram} -Xms1G -jar server.jar nogui
 """
             with open(os.path.join(self.path, "start.sh"), "w") as f:
                 f.write(start_script)
             os.chmod(os.path.join(self.path, "start.sh"), 0o755)
             
-            # Pozostałe pliki - natychmiast
-            for filename, content in [
-                ("ops.json", "[]"),
-                ("whitelist.json", "[]"),
-                ("banned-ips.json", "[]"),
-                ("banned-players.json", "[]"),
-                ("usercache.json", "[]")
-            ]:
+            # 4. Podstawowe pliki JSON - NATYCHMIAST
+            basic_files = {
+                "ops.json": "[]",
+                "whitelist.json": "[]", 
+                "banned-ips.json": "[]",
+                "banned-players.json": "[]",
+                "usercache.json": "[]"
+            }
+            
+            for filename, content in basic_files.items():
                 with open(os.path.join(self.path, filename), "w") as f:
                     f.write(content + "\\n")
             
-            self.files_created = True
+            # 5. Pliki konfiguracyjne - NATYCHMIAST
+            bukkit_config = """settings:
+  allow-end: true
+  warn-on-overload: true
+  permissions-file: permissions.yml
+  update-folder: update
+  plugin-profiling: false
+  connection-throttle: 4000
+  query-plugins: true
+  deprecated-verbose: default
+  shutdown-message: Server shutdown
+"""
+            with open(os.path.join(self.path, "bukkit.yml"), "w") as f:
+                f.write(bukkit_config)
+            
+            permissions_config = """permissions:
+  default:
+    description: Default permissions
+    children:
+      bukkit.command.help: true
+      bukkit.command.list: true
+      bukkit.command.tell: true
+      bukkit.command.me: true
+"""
+            with open(os.path.join(self.path, "permissions.yml"), "w") as f:
+                f.write(permissions_config)
+            
+            # 6. Log startu - NATYCHMIAST
+            with open(os.path.join(self.path, "startup.log"), "w") as f:
+                f.write(f"PurpleHost Instant Server Start\\n")
+                f.write(f"Server: {self.name}\\n")
+                f.write(f"Version: {self.version}\\n")
+                f.write(f"RAM: {self.ram}\\n")
+                f.write(f"Port: {self.port}\\n")
+                f.write(f"Started: {datetime.now().isoformat()}\\n")
+                f.write("="*40 + "\\n")
+            
             return True
             
         except Exception as e:
             print(f"Błąd tworzenia plików: {e}")
             return False
         
-    def download_server_jar_fast(self):
-        """Szybkie pobieranie server.jar"""
+    def download_server_jar_instant(self):
+        """Natychmiastowe pobieranie server.jar"""
         jar_path = os.path.join(self.path, "server.jar")
         if os.path.exists(jar_path):
             return True
@@ -168,6 +243,7 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             
         try:
             url = MINECRAFT_VERSIONS[self.version]
+            # Natychmiastowe pobieranie bez progressu
             urllib.request.urlretrieve(url, jar_path)
             return os.path.exists(jar_path)
                 
@@ -175,19 +251,19 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             print(f"Błąd pobierania: {e}")
             return False
     
-    def setup_server_files_instant(self):
-        """Natychmiastowa konfiguracja wszystkich plików"""
+    def setup_server_instant(self):
+        """NATYCHMIASTOWA konfiguracja całego serwera"""
         try:
-            # 1. Tworzenie folderu
+            # 1. Utwórz folder jeśli nie istnieje
             if not os.path.exists(self.path):
                 os.makedirs(self.path, exist_ok=True)
             
-            # 2. Natychmiastowe tworzenie plików
-            if not self.create_essential_files_instant():
+            # 2. NATYCHMIAST utwórz wszystkie pliki
+            if not self.create_all_files_instantly():
                 return False
                 
-            # 3. Szybkie pobieranie server.jar
-            if not self.download_server_jar_fast():
+            # 3. NATYCHMIAST pobierz server.jar
+            if not self.download_server_jar_instant():
                 return False
                 
             return True
@@ -197,20 +273,21 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             return False
     
     def start(self):
-        """Natychmiastowe uruchomienie z auto-plikami"""
+        """NATYCHMIASTOWE uruchomienie serwera"""
         if self.status != "stopped":
+            self.add_console("⚠️ Serwer już działa!")
             return False
             
         try:
-            # NATYCHMIASTOWE WGRANIE PLIKÓW
+            # NATYCHMIASTOWE TWORZENIE PLIKÓW
             self.add_console("⚡ NATYCHMIASTOWE TWORZENIE PLIKÓW...")
             
-            if not self.setup_server_files_instant():
+            if not self.setup_server_instant():
                 self.add_console("❌ Błąd tworzenia plików")
                 return False
             
-            self.add_console("✅ WSZYSTKIE PLIKI UTWORZONE!")
-            self.add_console("🔥 URUCHAMIANIE SERWERA...")
+            self.add_console("✅ WSZYSTKIE PLIKI UTWORZONE NATYCHMIAST!")
+            self.add_console("🔥 URUCHAMIANIE SERWERA MINECRAFT...")
             
             # Uruchom proces Java
             cmd = f"cd {self.path} && java -Xmx{self.ram} -Xms1G -jar server.jar nogui"
@@ -230,10 +307,12 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             # Wątek do odczytu konsoli
             threading.Thread(target=self._read_console, daemon=True).start()
             
+            self.add_console("🎯 PROCES SERWERA URUCHOMIONY!")
+            
             return True
             
         except Exception as e:
-            self.add_console(f"❌ BŁĄD: {e}")
+            self.add_console(f"❌ BŁĄD URUCHAMIANIA: {e}")
             return False
     
     def stop(self):
@@ -245,11 +324,13 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             self.add_console("🛑 Zatrzymywanie serwera...")
             self.send_command("stop")
             
+            # Czekaj max 10 sekund
             for i in range(10):
                 if self.process.poll() is not None:
                     break
                 time.sleep(1)
             
+            # Force kill jeśli wciąż działa
             if self.process.poll() is None:
                 self.process.terminate()
                 time.sleep(2)
@@ -289,6 +370,7 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
             except:
                 break
         
+        # Serwer się zamknął
         if self.status == "running":
             self.status = "stopped"
             self.add_console("💥 Serwer został zamknięty")
@@ -297,22 +379,25 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
         """Przetwarza output z konsoli"""
         self.add_console(line)
         
+        # Wykrywanie gotowości serwera
         if "Done" in line and "For help, type \"help\"" in line:
             self.status = "running"
-            self.add_console("🎉 SERWER GOTOWY!")
-            self.add_console(f"🌐 localhost:{self.port}")
+            self.add_console("🎉 SERWER MINECRAFT GOTOWY!")
+            self.add_console(f"🌐 ADRES: localhost:{self.port}")
+            self.add_console("👤 Podłącz się z gry Minecraft!")
             
+        # Wykrywanie graczy
         elif "joined the game" in line:
             player = line.split("]")[1].split(" joined the game")[0].strip()
             if player not in self.players:
                 self.players.append(player)
-                self.add_console(f"👤 {player} dołączył")
+                self.add_console(f"👤 {player} dołączył do gry")
                 
         elif "left the game" in line:
             player = line.split("]")[1].split(" left the game")[0].strip()
             if player in self.players:
                 self.players.remove(player)
-                self.add_console(f"👤 {player} opuścił")
+                self.add_console(f"👤 {player} opuścił grę")
     
     def add_console(self, message):
         """Dodaje wiadomość do konsoli"""
@@ -320,9 +405,11 @@ java -Xmx{self.ram} -Xms1G -jar server.jar nogui
         full_message = f"[{timestamp}] {message}"
         self.console_buffer.append(full_message)
         
+        # Ogranicz do 500 linii
         if len(self.console_buffer) > 500:
             self.console_buffer = self.console_buffer[-500:]
         
+        # Wywołaj callbacki
         for callback in self.console_callbacks:
             callback(full_message)
     
@@ -485,11 +572,11 @@ PYTHON
 }
 
 # =============================================
-# 🌐 PANEL WEB - NATYCHMIASTOWE DZIAŁANIE
+# 🌐 PANEL WEB - NATYCHMIASTOWE TWORZENIE
 # =============================================
 
 create_web_panel() {
-    echo -e "${PURPLE}🌐 Tworzenie panelu web z natychmiastowym działaniem...${NC}"
+    echo -e "${PURPLE}🌐 Tworzenie panelu web z natychmiastowym tworzeniem plików...${NC}"
     
     cat > "$WEB_DIR/index.html" << 'HTML'
 <!DOCTYPE html>
@@ -497,7 +584,7 @@ create_web_panel() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 PurpleHost - Natychmiastowe Serwery</title>
+    <title>🚀 PurpleHost - Natychmiastowe Tworzenie Plików</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <style>
         * {
@@ -725,6 +812,15 @@ create_web_panel() {
             padding: 1rem;
             margin-top: 1rem;
         }
+        .instant-badge {
+            background: rgba(255, 193, 7, 0.2);
+            color: #FFC107;
+            border: 1px solid rgba(255, 193, 7, 0.3);
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -734,8 +830,11 @@ create_web_panel() {
                 <i class="fas fa-bolt"></i>
                 PurpleHost
             </div>
-            <h1>⚡ Natychmiastowe Serwery Minecraft</h1>
+            <h1>⚡ Natychmiastowe Tworzenie Plików</h1>
             <p>Kliknij "Start" - pliki tworzą się NATYCHMIAST!</p>
+            <div class="instant-badge" style="display: inline-block; margin-top: 1rem;">
+                ⚡ NATYCHMIASTOWE DZIAŁANIE
+            </div>
         </div>
 
         <div style="text-align: center; margin-bottom: 2rem;">
@@ -817,16 +916,25 @@ create_web_panel() {
                     <div class="main-content">
                         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
                             <h4><i class="fas fa-terminal"></i> Konsola - Live</h4>
-                            <small style="color: var(--secondary);">⚡ Natychmiastowe działanie</small>
+                            <div class="instant-badge">⚡ NATYCHMIASTOWE PLIKI</div>
                         </div>
                         <div class="console-container">
                             <div class="console-output" id="consoleOutput">
-🚀 PurpleHost - Natychmiastowe Uruchamianie
-─────────────────────────────────────────────
+🚀 PurpleHost - Natychmiastowe Tworzenie Plików
+──────────────────────────────────────────────────
+
 Gotowy do działania! Kliknij "Start" aby:
-• Natychmiast utworzyć pliki
-• Pobrać server.jar  
-• Uruchomić serwer
+
+⚡ NATYCHMIAST utworzyć:
+• server.properties
+• eula.txt (automatycznie zaakceptowana)
+• start.sh
+• ops.json, whitelist.json
+• banned-ips.json, banned-players.json
+• bukkit.yml, permissions.yml
+• server.jar (pobrany z Mojang)
+
+🔥 NATYCHMIAST uruchomić serwer Minecraft
 
 Działanie w czasie rzeczywistym - bez oczekiwania!
                             </div>
@@ -843,7 +951,7 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
                     <div class="sidebar">
                         <!-- STATUS -->
                         <div class="info-box">
-                            <h4>📊 Status</h4>
+                            <h4>📊 Status Serwera</h4>
                             <div class="info-item">
                                 <span>Status:</span>
                                 <span id="statusText" style="color: var(--accent);">OFFLINE</span>
@@ -860,38 +968,46 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
                                 <span>Port:</span>
                                 <span id="portText">25565</span>
                             </div>
+                            <div class="info-item">
+                                <span>RAM:</span>
+                                <span id="ramText">2GB</span>
+                            </div>
                         </div>
 
                         <!-- AKCJE -->
                         <div class="info-box">
-                            <h4>⚡ Akcje</h4>
+                            <h4>⚡ Szybkie Akcje</h4>
                             <div class="quick-actions">
-                                <button class="btn" onclick="sendQuickCommand('say Witaj!')">
+                                <button class="btn" onclick="sendQuickCommand('say Witaj na serwerze!')">
                                     <i class="fas fa-bullhorn"></i> Powitanie
                                 </button>
                                 <button class="btn" onclick="sendQuickCommand('list')">
-                                    <i class="fas fa-list"></i> Gracze
+                                    <i class="fas fa-list"></i> Lista graczy
                                 </button>
                                 <button class="btn" onclick="sendQuickCommand('time set day')">
                                     <i class="fas fa-sun"></i> Dzień
                                 </button>
+                                <button class="btn" onclick="sendQuickCommand('weather clear')">
+                                    <i class="fas fa-cloud-sun"></i> Pogoda
+                                </button>
                             </div>
                         </div>
 
-                        <!-- PLIKI -->
+                        <!-- UTWORZONE PLIKI -->
                         <div class="info-box">
-                            <h4>📁 Pliki</h4>
+                            <h4>📁 Utworzone Pliki</h4>
                             <div class="file-manager" id="fileManager">
                                 <div style="text-align: center; color: var(--gray); padding: 1rem;">
                                     <i class="fas fa-folder-plus"></i><br>
-                                    Kliknij Start
+                                    Kliknij "Start"<br>
+                                    <small>pliki utworzą się natychmiast</small>
                                 </div>
                             </div>
                         </div>
 
                         <!-- INFO -->
                         <div class="connection-info">
-                            <h4>🌐 Jak grać?</h4>
+                            <h4>🌐 Jak dołączyć?</h4>
                             <p>1. Kliknij "Start"</p>
                             <p>2. Poczekaj na "Done" w konsoli</p>
                             <p>3. Minecraft → Multiplayer</p>
@@ -1023,6 +1139,8 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
 
             document.getElementById('serverNameTitle').textContent = server.name;
             document.getElementById('serverAddress').textContent = `localhost:${server.port}`;
+            document.getElementById('ramText').textContent = server.ram;
+            document.getElementById('portText').textContent = server.port;
             
             updateServerStatus(server);
             updateConsole();
@@ -1050,7 +1168,6 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
             document.getElementById('statusText').style.color = server.status === 'running' ? 'var(--secondary)' : 'var(--accent)';
             document.getElementById('playersText').textContent = server.players;
             document.getElementById('uptimeText').textContent = server.uptime;
-            document.getElementById('portText').textContent = server.port;
             
             document.getElementById('startBtn').style.display = server.status === 'running' ? 'none' : 'flex';
             document.getElementById('stopBtn').style.display = server.status === 'running' ? 'flex' : 'none';
@@ -1100,7 +1217,8 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
                 fileManager.innerHTML = `
                     <div style="text-align: center; color: var(--gray); padding: 1rem;">
                         <i class="fas fa-folder-plus"></i><br>
-                        Brak plików
+                        Brak plików<br>
+                        <small>Kliknij "Start" aby utworzyć</small>
                     </div>
                 `;
                 return;
@@ -1108,19 +1226,20 @@ Działanie w czasie rzeczywistym - bez oczekiwania!
 
             fileManager.innerHTML = files.map(file => `
                 <div class="file-item">
-                    <i class="fas fa-${file.is_directory ? 'folder' : 'file'}"></i>
+                    <i class="fas fa-${file.is_directory ? 'folder' : 'file'} ${file.name === 'server.jar' ? 'fa-jar' : ''}"></i>
                     <span>${file.name}</span>
+                    ${!file.is_directory ? `<small>(${(file.size / 1024).toFixed(1)} KB)</small>` : ''}
                 </div>
             `).join('');
         }
 
-        // ⚡ NATYCHMIASTOWE URUCHOMIENIE SERWERA
+        // ⚡ NATYCHMIASTOWE TWORZENIE PLIKÓW I URUCHOMIENIE
         async function startServerInstant() {
             if (!currentServerId) return;
             
             // Natychmiastowa informacja w konsoli
             const consoleOutput = document.getElementById('consoleOutput');
-            consoleOutput.textContent = `⚡ ROZPOCZĘCIE NATYCHMIASTOWEJ KONFIGURACJI...
+            consoleOutput.textContent = `⚡ ROZPOCZĘCIE NATYCHMIASTOWEGO TWORZENIA PLIKÓW...
             
 📛 Serwer: ${document.getElementById('serverNameTitle').textContent}
 🌐 Port: ${document.getElementById('portText').textContent}
@@ -1297,7 +1416,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print(f"🌐 {self.address_string()} - {format % args}")
 
 print(f"🚀 PurpleHost starting on http://localhost:{PORT}")
-print("⚡ NATYCHMIASTOWE SERWERY MINECRAFT")
+print("⚡ NATYCHMIASTOWE TWORZENIE PLIKÓW - DZIAŁA!")
 print("📁 Serving from:", WEB_DIR)
 
 os.chdir(WEB_DIR)
@@ -1339,7 +1458,7 @@ start_system() {
         echo -e "${GREEN}🎉 PURPLEHOST DZIAŁA!${NC}"
         echo ""
         echo -e "${CYAN}🌐 Adres panelu: http://localhost:8080${NC}"
-        echo -e "${CYAN}⚡ NATYCHMIASTOWE WGRYWANIE PLIKÓW${NC}"
+        echo -e "${CYAN}⚡ NATYCHMIASTOWE TWORZENIE PLIKÓW${NC}"
         echo ""
         echo -e "${YELLOW}📝 Jak używać:${NC}"
         echo "1. Wejdź na http://localhost:8080"
@@ -1369,7 +1488,7 @@ echo -e "${PURPLE}"
 echo "╔══════════════════════════════════════╗"
 echo "║          🚀 PURPLEHOST PRO           ║"
 echo "║      Natychmiastowe Serwery MC       ║"
-echo "║         ⚡ BEZ Oczekiwania!          ║"
+echo "║         ⚡ TWORZENIE PLIKÓW!         ║"
 echo "╚══════════════════════════════════════╝"
 echo -e "${NC}"
 
