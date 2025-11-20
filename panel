@@ -67,7 +67,7 @@ check_dependencies() {
 }
 
 # =============================================
-# 🐍 BACKEND - PRAWDZIWE SERWERY Z AUTO-PLIKAMI
+# 🐍 BACKEND - PRAWDZIWE SERWERY
 # =============================================
 
 create_backend() {
@@ -627,7 +627,7 @@ PYTHON
 }
 
 # =============================================
-# 🌐 PANEL WEB Z PEŁNĄ KONSOLĄ
+# 🌐 PANEL WEB Z KONSOLĄ
 # =============================================
 
 create_web_panel() {
@@ -684,15 +684,16 @@ create_web_panel() {
             display: inline-flex;
             align-items: center;
             gap: 0.5rem;
-            padding: 1rem 2rem;
+            padding: 0.75rem 1.5rem;
             background: linear-gradient(135deg, var(--primary), var(--primary-dark));
             color: white;
             border: none;
-            border-radius: 10px;
+            border-radius: 8px;
             font-weight: 600;
             cursor: pointer;
             text-decoration: none;
             transition: transform 0.3s;
+            font-size: 0.9rem;
         }
         .btn:hover {
             transform: translateY(-2px);
@@ -746,47 +747,52 @@ create_web_panel() {
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(0,0,0,0.8);
+            background: rgba(0,0,0,0.9);
             z-index: 1000;
         }
         .modal-content {
             background: var(--dark);
             border: 1px solid rgba(255,255,255,0.1);
             border-radius: 15px;
-            margin: 2% auto;
+            margin: 1% auto;
             padding: 0;
-            width: 95%;
-            max-width: 95%;
-            max-height: 95vh;
+            width: 98%;
+            height: 98vh;
             overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
         .modal-header {
-            padding: 1.5rem 2rem;
+            padding: 1rem 2rem;
             border-bottom: 1px solid rgba(255,255,255,0.1);
             display: flex;
             justify-content: space-between;
             align-items: center;
+            background: rgba(0,0,0,0.3);
         }
         .modal-body {
-            padding: 2rem;
-            max-height: calc(95vh - 100px);
-            overflow-y: auto;
+            padding: 1.5rem;
+            flex: 1;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
         }
-        .full-console {
-            width: 100%;
-            height: 70vh;
+        .console-container {
             background: #000;
             border-radius: 8px;
             padding: 1rem;
             font-family: 'Courier New', monospace;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
+            flex: 1;
             overflow-y: auto;
-            margin-bottom: 1rem;
+            border: 1px solid #333;
         }
         .console-output {
             color: #00ff00;
             white-space: pre-wrap;
             line-height: 1.4;
+            min-height: 100%;
         }
         .console-input {
             display: flex;
@@ -800,56 +806,69 @@ create_web_panel() {
             border-radius: 6px;
             color: white;
             font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+        }
+        .management-panel {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 1.5rem;
+            height: 100%;
+        }
+        .main-content {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .sidebar {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+        .info-box {
+            background: rgba(255,255,255,0.05);
+            border-radius: 8px;
+            padding: 1.5rem;
+        }
+        .info-box h4 {
+            margin-bottom: 1rem;
+            color: var(--secondary);
+        }
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        .quick-actions {
+            display: grid;
+            gap: 0.5rem;
         }
         .file-manager {
             background: rgba(255,255,255,0.05);
             border-radius: 8px;
             padding: 1rem;
-            height: 400px;
+            max-height: 200px;
             overflow-y: auto;
         }
         .file-item {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
-            padding: 0.75rem;
+            gap: 0.5rem;
+            padding: 0.5rem;
             border-radius: 6px;
             cursor: pointer;
+            font-size: 0.85rem;
         }
         .file-item:hover {
             background: rgba(255,255,255,0.1);
         }
-        .file-actions {
-            display: flex;
-            gap: 0.5rem;
-            margin-bottom: 1rem;
-        }
-        .upload-area {
-            border: 2px dashed rgba(255,255,255,0.3);
-            border-radius: 8px;
-            padding: 2rem;
-            text-align: center;
-            margin-bottom: 1rem;
-            cursor: pointer;
-            transition: all 0.3s;
-        }
-        .upload-area:hover {
-            border-color: var(--primary);
-            background: rgba(139, 92, 246, 0.1);
-        }
-        .upload-area.dragover {
-            border-color: var(--secondary);
+        .connection-info {
             background: rgba(6, 214, 160, 0.1);
-        }
-        .server-management {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 2rem;
-        }
-        @media (max-width: 1024px) {
-            .server-management {
-                grid-template-columns: 1fr;
-            }
+            border: 1px solid rgba(6, 214, 160, 0.3);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1rem;
         }
     </style>
 </head>
@@ -857,16 +876,16 @@ create_web_panel() {
     <div class="container">
         <div class="header">
             <div class="logo">
-                <i class="fas fa-rocket"></i>
+                <i class="fas fa-server"></i>
                 PurpleHost
             </div>
-            <h1>💥 Prawdziwe Serwery Minecraft</h1>
-            <p>Twórz, zarządzaj i graj na prawdziwych serwerach!</p>
+            <h1>🎮 Panele Serwerów Minecraft</h1>
+            <p>Kliknij "Zarządzaj" aby otworzyć panel z konsolą serwera</p>
         </div>
 
         <div style="text-align: center; margin-bottom: 2rem;">
             <button class="btn" onclick="showCreateServer()">
-                <i class="fas fa-plus"></i> Utwórz Nowy Serwer
+                <i class="fas fa-plus"></i> Nowy Serwer
             </button>
         </div>
 
@@ -879,19 +898,19 @@ create_web_panel() {
     <div id="createModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3>🎮 Utwórz Nowy Serwer Minecraft</h3>
+                <h3>🎮 Utwórz Nowy Serwer</h3>
                 <span onclick="closeModal('createModal')" style="cursor:pointer;font-size:1.5rem;">&times;</span>
             </div>
             <div class="modal-body">
                 <div style="max-width: 500px; margin: 0 auto;">
                     <div style="margin-bottom: 1.5rem;">
                         <label style="display:block; margin-bottom:0.5rem;">Nazwa serwera:</label>
-                        <input type="text" id="serverName" placeholder="np. Mój Serwer" style="width:100%; padding:0.75rem; border-radius:6px; border:1px solid #333; background:#1a1a1a; color:white;">
+                        <input type="text" id="serverName" placeholder="np. Mój Serwer Survival" style="width:100%; padding:0.75rem; border-radius:6px; border:1px solid #333; background:#1a1a1a; color:white;">
                     </div>
                     <div style="margin-bottom: 1.5rem;">
                         <label style="display:block; margin-bottom:0.5rem;">Wersja Minecraft:</label>
                         <select id="serverVersion" style="width:100%; padding:0.75rem; border-radius:6px; border:1px solid #333; background:#1a1a1a; color:white;">
-                            <option value="1.20.1">1.20.1 (Latest)</option>
+                            <option value="1.20.1">1.20.1 (Najnowsza)</option>
                             <option value="1.19.4">1.19.4</option>
                             <option value="1.18.2">1.18.2</option>
                         </select>
@@ -906,141 +925,127 @@ create_web_panel() {
                     </div>
                     <div style="display:flex; gap:1rem; justify-content:flex-end;">
                         <button class="btn" onclick="closeModal('createModal')">Anuluj</button>
-                        <button class="btn btn-success" onclick="createServer()">Utwórz Serwer</button>
+                        <button class="btn btn-success" onclick="createServer()">
+                            <i class="fas fa-plus"></i> Utwórz Serwer
+                        </button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Modal zarządzania serwerem Z PEŁNĄ KONSOLĄ -->
+    <!-- 🎮 GŁÓWNY PANEL ZARZĄDZANIA Z KONSOLĄ -->
     <div id="manageModal" class="modal">
         <div class="modal-content">
             <div class="modal-header">
-                <h3 id="manageTitle">🎮 Zarządzanie Serwerem - <span id="serverNameTitle"></span></h3>
-                <span onclick="closeModal('manageModal')" style="cursor:pointer;font-size:1.5rem;">&times;</span>
+                <h3>
+                    <i class="fas fa-terminal"></i>
+                    Panel Serwera: <span id="serverNameTitle">Nazwa Serwera</span>
+                    <span id="serverStatusBadge" class="server-status status-offline" style="margin-left: 1rem; font-size: 0.8rem;">OFFLINE</span>
+                </h3>
+                <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button class="btn btn-success" id="startBtn" onclick="startServer()">
+                        <i class="fas fa-play"></i> Start
+                    </button>
+                    <button class="btn btn-danger" id="stopBtn" onclick="stopServer()" style="display:none;">
+                        <i class="fas fa-stop"></i> Stop
+                    </button>
+                    <button class="btn" onclick="refreshManager()">
+                        <i class="fas fa-sync"></i>
+                    </button>
+                    <span onclick="closeModal('manageModal')" style="cursor:pointer;font-size:1.5rem; margin-left: 1rem;">&times;</span>
+                </div>
             </div>
+            
             <div class="modal-body">
-                <div class="server-management">
-                    <!-- KONSOLA NA PEŁNE OKNO -->
-                    <div>
-                        <h4 style="margin-bottom:1rem;">
-                            <i class="fas fa-terminal"></i> KONSOLA SERWERA - LIVE
-                            <span id="serverStatusBadge" class="server-status status-offline" style="margin-left: 1rem;">OFFLINE</span>
-                        </h4>
-                        <div class="full-console">
+                <div class="management-panel">
+                    <!-- GŁÓWNA KONSOLA -->
+                    <div class="main-content">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+                            <h4><i class="fas fa-terminal"></i> Konsola Serwera</h4>
+                            <small id="consoleInfo">Live - odświeżanie co 1s</small>
+                        </div>
+                        <div class="console-container">
                             <div class="console-output" id="consoleOutput">
-🚀 PURPLEHOST - KONSOLA SERWERA MINECRAFT
-⏳ Przygotowywanie... Kliknij "Start Serwer" aby rozpocząć.
+🚀 PurpleHost - Panel Konsoli Serwera Minecraft
+─────────────────────────────────────────────────────
+Konsola jest gotowa. Kliknij "Start" aby uruchomić serwer.
+Po uruchomieniu tutaj zobaczysz live output z serwera Minecraft.
                             </div>
                         </div>
                         <div class="console-input">
-                            <input type="text" id="consoleInput" placeholder="Wpisz komendę Minecraft (help, say, gamemode, tp, etc.)">
-                            <button class="btn" onclick="sendCommand()">Wyślij</button>
+                            <input type="text" id="consoleInput" placeholder="Wpisz komendę Minecraft (help, say, gamemode, give, tp...) i naciśnij Enter">
+                            <button class="btn" onclick="sendCommand()">
+                                <i class="fas fa-paper-plane"></i> Wyślij
+                            </button>
                         </div>
                     </div>
 
-                    <!-- Panel boczny z informacjami i plikami -->
-                    <div>
-                        <!-- Informacje o serwerze -->
-                        <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;">
-                            <h4 style="margin-bottom:1rem;">📊 Status Serwera</h4>
-                            <div style="display: grid; gap: 0.5rem;">
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>Status:</span>
-                                    <span id="statusText" style="color: var(--accent);">OFFLINE</span>
-                                </div>
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>Gracze:</span>
-                                    <span id="playersText">0/20</span>
-                                </div>
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>Uptime:</span>
-                                    <span id="uptimeText">00:00:00</span>
-                                </div>
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>Port:</span>
-                                    <span id="portText">25565</span>
-                                </div>
-                                <div style="display: flex; justify-content: space-between;">
-                                    <span>RAM:</span>
-                                    <span id="ramText">2GB</span>
-                                </div>
+                    <!-- PANEL BOCZNY -->
+                    <div class="sidebar">
+                        <!-- STATUS SERWERA -->
+                        <div class="info-box">
+                            <h4>📊 Status Serwera</h4>
+                            <div class="info-item">
+                                <span>Status:</span>
+                                <span id="statusText" style="color: var(--accent);">OFFLINE</span>
+                            </div>
+                            <div class="info-item">
+                                <span>Gracze:</span>
+                                <span id="playersText">0/20</span>
+                            </div>
+                            <div class="info-item">
+                                <span>Uptime:</span>
+                                <span id="uptimeText">00:00:00</span>
+                            </div>
+                            <div class="info-item">
+                                <span>Port:</span>
+                                <span id="portText">25565</span>
+                            </div>
+                            <div class="info-item">
+                                <span>RAM:</span>
+                                <span id="ramText">2GB</span>
+                            </div>
+                            <div class="info-item">
+                                <span>Wersja:</span>
+                                <span id="versionText">1.20.1</span>
                             </div>
                         </div>
 
-                        <!-- Szybkie akcje -->
-                        <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 1.5rem; margin-bottom: 1rem;">
-                            <h4 style="margin-bottom:1rem;">⚡ Szybkie Akcje</h4>
-                            <div style="display: grid; gap: 0.5rem;">
-                                <button class="btn btn-success" id="startBtn" onclick="startServer()">
-                                    <i class="fas fa-play"></i> Start Serwer
+                        <!-- SZYBKIE AKCJE -->
+                        <div class="info-box">
+                            <h4>⚡ Szybkie Akcje</h4>
+                            <div class="quick-actions">
+                                <button class="btn btn-warning" onclick="sendQuickCommand('say Witaj na serwerze!')">
+                                    <i class="fas fa-bullhorn"></i> Powitanie
                                 </button>
-                                <button class="btn btn-danger" id="stopBtn" onclick="stopServer()" style="display:none;">
-                                    <i class="fas fa-stop"></i> Stop Serwer
+                                <button class="btn" onclick="sendQuickCommand('list')">
+                                    <i class="fas fa-list"></i> Lista graczy
                                 </button>
-                                <button class="btn btn-warning" onclick="showUploadModal()">
-                                    <i class="fas fa-upload"></i> Wgraj Pliki
+                                <button class="btn" onclick="sendQuickCommand('time set day')">
+                                    <i class="fas fa-sun"></i> Dzień
                                 </button>
-                                <button class="btn" onclick="refreshManager()">
-                                    <i class="fas fa-sync"></i> Odśwież
+                                <button class="btn" onclick="sendQuickCommand('weather clear')">
+                                    <i class="fas fa-cloud-sun"></i> Pogoda
                                 </button>
                             </div>
                         </div>
 
-                        <!-- Ostatnie pliki -->
-                        <div style="background: rgba(255,255,255,0.05); border-radius: 8px; padding: 1.5rem;">
-                            <h4 style="margin-bottom:1rem;">📁 Ostatnie Pliki</h4>
-                            <div class="file-manager" id="fileManager" style="height: 200px;">
+                        <!-- OSTATNIE PLIKI -->
+                        <div class="info-box">
+                            <h4>📁 Pliki Serwera</h4>
+                            <div class="file-manager" id="fileManager">
                                 Ładowanie plików...
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Informacje o połączeniu -->
-                <div style="margin-top: 2rem; padding: 1rem; background: rgba(6, 214, 160, 0.1); border-radius: 8px; border: 1px solid rgba(6, 214, 160, 0.3);">
-                    <h4>🌐 Jak się podłączyć do serwera:</h4>
-                    <p>1. Uruchom serwer (poczekaj aż w konsoli pojawi się "Done")</p>
-                    <p>2. Uruchom Minecraft → Multiplayer → Direct Connect</p>
-                    <p>3. Wpisz adres: <strong id="serverAddress">localhost:PORT</strong></p>
-                    <p>4. Kliknij "Join Server" i graj! 🎮</p>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Modal wgrywania plików -->
-    <div id="uploadModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>📤 Wgrywanie Plików</h3>
-                <span onclick="closeModal('uploadModal')" style="cursor:pointer;font-size:1.5rem;">&times;</span>
-            </div>
-            <div class="modal-body">
-                <div style="max-width: 600px; margin: 0 auto;">
-                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.7;"></i>
-                        <h4>Kliknij lub przeciągnij pliki tutaj</h4>
-                        <p>Możesz wgrać pluginy (.jar), światy, konfiguracje i inne pliki</p>
-                    </div>
-                    
-                    <input type="file" id="fileInput" multiple style="display: none;" onchange="handleFileSelect(this.files)">
-                    
-                    <div id="uploadProgress" style="margin-top: 1rem;"></div>
-                    
-                    <div style="margin-top: 2rem;">
-                        <h4>💡 Przykładowe pliki do wgrania:</h4>
-                        <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-                            <li><strong>Pluginy Bukkit/Spigot</strong> (.jar)</li>
-                            <li><strong>Światy Minecraft</strong> (folder world/)</li>
-                            <li><strong>Konfiguracje pluginów</strong> (.yml, .json)</li>
-                            <li><strong>Własne skrypty</strong> startowe</li>
-                        </ul>
-                    </div>
-                    
-                    <div style="display:flex; gap:1rem; justify-content:flex-end; margin-top: 2rem;">
-                        <button class="btn" onclick="closeModal('uploadModal')">Zamknij</button>
+                        <!-- INFORMACJE O POŁĄCZENIU -->
+                        <div class="connection-info">
+                            <h4>🌐 Jak dołączyć?</h4>
+                            <p>1. Uruchom Minecraft</p>
+                            <p>2. Multiplayer → Direct Connect</p>
+                            <p>3. Adres: <strong id="serverAddress">localhost:25565</strong></p>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -1050,7 +1055,6 @@ create_web_panel() {
     <script>
         let currentServerId = null;
         let consoleInterval = null;
-        let currentPath = '';
         let statusInterval = null;
 
         // API functions
@@ -1078,25 +1082,38 @@ create_web_panel() {
             const container = document.getElementById('serversContainer');
             
             if (servers.length === 0) {
-                container.innerHTML = '<div class="server-card"><h3>🎮 Brak serwerów</h3><p>Kliknij "Utwórz Nowy Serwer" aby rozpocząć!</p></div>';
+                container.innerHTML = `
+                    <div class="server-card" style="text-align: center; grid-column: 1 / -1;">
+                        <h3>🎮 Brak serwerów</h3>
+                        <p>Utwórz pierwszy serwer Minecraft aby rozpocząć!</p>
+                        <button class="btn" onclick="showCreateServer()" style="margin-top: 1rem;">
+                            <i class="fas fa-plus"></i> Utwórz Pierwszy Serwer
+                        </button>
+                    </div>
+                `;
                 return;
             }
 
             container.innerHTML = servers.map(server => `
                 <div class="server-card">
                     <h3>${server.name}</h3>
-                    <p>🛠️ Minecraft ${server.version} • 💾 ${server.ram} RAM</p>
-                    <p>🌐 Port: ${server.port} • 👥 Gracze: ${server.players}</p>
-                    <p>⏱️ Czas działania: ${server.uptime}</p>
+                    <p>🎮 Wersja: ${server.version}</p>
+                    <p>💾 RAM: ${server.ram}</p>
+                    <p>🌐 Port: ${server.port}</p>
+                    <p>👥 Gracze: ${server.players}</p>
+                    <p>⏱️ Uptime: ${server.uptime}</p>
                     <span class="server-status ${server.status === 'running' ? 'status-online' : 'status-offline'}">
                         ${server.status === 'running' ? '🟢 ONLINE' : '🔴 OFFLINE'}
                     </span>
                     <div style="margin-top: 1rem; display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                        ${server.status === 'running' ? 
-                            '<button class="btn btn-danger" onclick="stopServerFromList(' + server.id + ')">🛑 Stop</button>' : 
-                            '<button class="btn btn-success" onclick="startServerFromList(' + server.id + ')">🚀 Start</button>'
-                        }
-                        <button class="btn" onclick="manageServer(${server.id})">⚙️ Zarządzaj</button>
+                        <button class="btn ${server.status === 'running' ? 'btn-danger' : 'btn-success'}" 
+                                onclick="${server.status === 'running' ? `stopServerFromList(${server.id})` : `startServerFromList(${server.id})`}">
+                            <i class="fas fa-${server.status === 'running' ? 'stop' : 'play'}"></i>
+                            ${server.status === 'running' ? 'Stop' : 'Start'}
+                        </button>
+                        <button class="btn" onclick="manageServer(${server.id})">
+                            <i class="fas fa-cog"></i> Zarządzaj
+                        </button>
                     </div>
                 </div>
             `).join('');
@@ -1118,7 +1135,7 @@ create_web_panel() {
             });
 
             if (server) {
-                alert('🎉 Serwer utworzony! Teraz możesz go uruchomić w panelu zarządzania.');
+                alert('🎉 Serwer utworzony! Teraz możesz go uruchomić.');
                 closeModal('createModal');
                 loadServers();
             }
@@ -1147,6 +1164,7 @@ create_web_panel() {
             setTimeout(loadServers, 3000);
         }
 
+        // 🎯 GŁÓWNA FUNKCJA - OTWIERANIE PANELU Z KONSOLĄ
         async function manageServer(serverId) {
             currentServerId = serverId;
             const servers = await apiRequest('/servers');
@@ -1154,24 +1172,24 @@ create_web_panel() {
             
             if (!server) return;
 
-            // Ustaw informacje w nagłówku
-            document.getElementById('manageTitle').textContent = `🎮 Zarządzanie Serwerem - ${server.name}`;
+            // Ustaw informacje o serwerze
             document.getElementById('serverNameTitle').textContent = server.name;
             document.getElementById('serverAddress').textContent = `localhost:${server.port}`;
             
-            // Ustaw informacje w panelu statusu
+            // Ustaw szczegóły serwera
             updateServerStatus(server);
             
             // Załaduj konsolę i pliki
             updateConsole();
             loadFiles();
 
-            // Auto-odświeżanie konsoli i statusu
+            // Uruchom auto-odświeżanie
             clearInterval(consoleInterval);
             clearInterval(statusInterval);
             consoleInterval = setInterval(updateConsole, 1000);
             statusInterval = setInterval(updateServerInfo, 2000);
 
+            // Pokaż panel zarządzania
             document.getElementById('manageModal').style.display = 'block';
         }
 
@@ -1185,18 +1203,22 @@ create_web_panel() {
         }
 
         function updateServerStatus(server) {
+            // Status tekstowy
             document.getElementById('statusText').textContent = server.status === 'running' ? 'ONLINE' : 'OFFLINE';
             document.getElementById('statusText').style.color = server.status === 'running' ? 'var(--secondary)' : 'var(--accent)';
+            
+            // Pozostałe informacje
             document.getElementById('playersText').textContent = server.players;
             document.getElementById('uptimeText').textContent = server.uptime;
             document.getElementById('portText').textContent = server.port;
             document.getElementById('ramText').textContent = server.ram;
+            document.getElementById('versionText').textContent = server.version;
             
-            // Ustaw przyciski
-            document.getElementById('startBtn').style.display = server.status === 'running' ? 'none' : 'inline-flex';
-            document.getElementById('stopBtn').style.display = server.status === 'running' ? 'inline-flex' : 'none';
+            // Przyciski start/stop
+            document.getElementById('startBtn').style.display = server.status === 'running' ? 'none' : 'flex';
+            document.getElementById('stopBtn').style.display = server.status === 'running' ? 'flex' : 'none';
             
-            // Status badge
+            // Status badge w nagłówku
             const badge = document.getElementById('serverStatusBadge');
             badge.textContent = server.status === 'running' ? '🟢 ONLINE' : '🔴 OFFLINE';
             badge.className = server.status === 'running' ? 'server-status status-online' : 'server-status status-offline';
@@ -1206,8 +1228,10 @@ create_web_panel() {
             if (!currentServerId) return;
             const output = await apiRequest('/servers/' + currentServerId + '/console');
             const consoleOutput = document.getElementById('consoleOutput');
-            consoleOutput.textContent = output || 'Brak danych z konsoli...';
-            consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            if (output && output !== consoleOutput.textContent) {
+                consoleOutput.textContent = output;
+                consoleOutput.scrollTop = consoleOutput.scrollHeight;
+            }
         }
 
         async function sendCommand() {
@@ -1225,10 +1249,15 @@ create_web_panel() {
             }
         }
 
-        async function loadFiles(path = '') {
+        function sendQuickCommand(command) {
             if (!currentServerId) return;
-            currentPath = path;
-            const files = await apiRequest('/servers/' + currentServerId + '/files?path=' + encodeURIComponent(path));
+            document.getElementById('consoleInput').value = command;
+            sendCommand();
+        }
+
+        async function loadFiles() {
+            if (!currentServerId) return;
+            const files = await apiRequest('/servers/' + currentServerId + '/files');
             
             const fileManager = document.getElementById('fileManager');
             if (!files || files.length === 0) {
@@ -1236,28 +1265,15 @@ create_web_panel() {
                 return;
             }
 
-            // Pokazuj tylko 10 ostatnich plików w panelu bocznym
-            const recentFiles = files.slice(-10);
+            // Pokazuj tylko 5 ostatnich plików
+            const recentFiles = files.slice(-5);
             
             fileManager.innerHTML = recentFiles.map(file => `
-                <div class="file-item" onclick="${file.is_directory ? `loadFiles('${file.path}')` : `viewFile('${file.path}')`}">
+                <div class="file-item">
                     <i class="fas fa-${file.is_directory ? 'folder' : 'file'}"></i>
                     <span>${file.name}</span>
-                    ${!file.is_directory ? `<small>(${formatFileSize(file.size)})</small>` : ''}
                 </div>
             `).join('');
-        }
-
-        function formatFileSize(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-        }
-
-        function viewFile(filePath) {
-            alert('Podgląd pliku: ' + filePath + '\n(Edytor plików wkrótce!)');
         }
 
         async function startServer() {
@@ -1265,7 +1281,7 @@ create_web_panel() {
             
             // Pokaż informację w konsoli
             const consoleOutput = document.getElementById('consoleOutput');
-            consoleOutput.textContent = '🚀 URUCHAMIANIE SERWERA...\n📦 Przygotowywanie plików...\n⏳ To może chwilę potrwać...\n';
+            consoleOutput.textContent = '🚀 URUCHAMIANIE SERWERA MINECRAFT...\n📦 Przygotowywanie plików...\n⏳ Proszę czekać...\n';
             
             await apiRequest('/servers/' + currentServerId + '/start');
             
@@ -1287,121 +1303,7 @@ create_web_panel() {
             updateConsole();
             loadFiles();
             updateServerInfo();
-            loadServers();
         }
-
-        // Upload functions
-        function showUploadModal() {
-            document.getElementById('uploadModal').style.display = 'block';
-        }
-
-        function handleFileSelect(files) {
-            const progress = document.getElementById('uploadProgress');
-            progress.innerHTML = '';
-            
-            Array.from(files).forEach((file, index) => {
-                uploadFile(file, index, files.length);
-            });
-        }
-
-        async function uploadFile(file, index, total) {
-            const progress = document.getElementById('uploadProgress');
-            const progressItem = document.createElement('div');
-            progressItem.innerHTML = `<div style="margin-bottom: 0.5rem;">
-                <strong>${file.name}</strong> (${formatFileSize(file.size)})
-                <div id="progress-${index}" style="background: #333; border-radius: 4px; margin-top: 0.25rem;">
-                    <div style="background: var(--secondary); height: 4px; width: 0%; border-radius: 4px; transition: width 0.3s;"></div>
-                </div>
-            </div>`;
-            progress.appendChild(progressItem);
-            
-            try {
-                const reader = new FileReader();
-                
-                reader.onload = async function(e) {
-                    const isBinary = file.type && !file.type.startsWith('text/');
-                    let fileContent;
-                    
-                    if (isBinary) {
-                        fileContent = 'data:application/octet-stream;base64,' + btoa(
-                            new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), '')
-                        );
-                    } else {
-                        fileContent = e.target.result;
-                    }
-                    
-                    const targetPath = currentPath ? currentPath + '/' + file.name : file.name;
-                    
-                    const result = await apiRequest('/servers/' + currentServerId + '/upload', {
-                        method: 'POST',
-                        body: JSON.stringify({
-                            file_path: targetPath,
-                            file_content: fileContent
-                        })
-                    });
-                    
-                    if (result && result.success) {
-                        document.querySelector(`#progress-${index} > div`).style.width = '100%';
-                        progressItem.innerHTML += '<span style="color: var(--secondary);"> ✅ Wgrano pomyślnie</span>';
-                        
-                        if (index === total - 1) {
-                            setTimeout(() => {
-                                loadFiles(currentPath);
-                                closeModal('uploadModal');
-                            }, 1000);
-                        }
-                    } else {
-                        progressItem.innerHTML += '<span style="color: var(--accent);"> ❌ Błąd wgrywania</span>';
-                    }
-                };
-                
-                if (file.type && !file.type.startsWith('text/')) {
-                    reader.readAsArrayBuffer(file);
-                } else {
-                    reader.readAsText(file);
-                }
-                
-            } catch (error) {
-                console.error('Błąd wgrywania:', error);
-                progressItem.innerHTML += '<span style="color: var(--accent);"> ❌ Błąd wgrywania</span>';
-            }
-        }
-
-        // Drag and drop
-        document.addEventListener('DOMContentLoaded', function() {
-            const uploadArea = document.getElementById('uploadArea');
-            
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, preventDefaults, false);
-            });
-            
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            ['dragenter', 'dragover'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, highlight, false);
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                uploadArea.addEventListener(eventName, unhighlight, false);
-            });
-            
-            function highlight() {
-                uploadArea.classList.add('dragover');
-            }
-            
-            function unhighlight() {
-                uploadArea.classList.remove('dragover');
-            }
-            
-            uploadArea.addEventListener('drop', function(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                handleFileSelect(files);
-            });
-        });
 
         // Auto-odświeżanie listy serwerów
         loadServers();
@@ -1410,6 +1312,14 @@ create_web_panel() {
         // Obsługa Enter w konsoli
         document.getElementById('consoleInput').addEventListener('keypress', function(e) {
             if (e.key === 'Enter') sendCommand();
+        });
+
+        // Zamknij modal ESC
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeModal('manageModal');
+                closeModal('createModal');
+            }
         });
     </script>
 </body>
@@ -1530,21 +1440,6 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 self.send_json({'success': success})
                             else:
                                 self.send_json({'error': 'No command'}, 400)
-                    
-                    elif len(path_parts) == 6 and path_parts[4] == 'upload':
-                        # POST /api/servers/{id}/upload
-                        if self.command == 'POST':
-                            content_length = int(self.headers['Content-Length'])
-                            body = self.rfile.read(content_length).decode()
-                            data = json.loads(body)
-                            file_path = data.get('file_path', '')
-                            file_content = data.get('file_content', '')
-                            
-                            if file_path and file_content:
-                                success = server_manager.upload_file(server_id, file_path, file_content)
-                                self.send_json({'success': success})
-                            else:
-                                self.send_json({'error': 'Missing file data'}, 400)
                 
                 else:
                     self.send_error(404)
@@ -1565,7 +1460,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print(f"🌐 {self.address_string()} - {format % args}")
 
 print(f"🚀 PurpleHost starting on http://localhost:{PORT}")
-print("💥 PRAWDZIWE SERWERY MINECRAFT - AUTO PLIKI + PEŁNA KONSOLA")
+print("💥 PRAWDZIWE SERWERY MINECRAFT - PANEL Z KONSOLĄ")
 print("📁 Serving from:", WEB_DIR)
 
 os.chdir(WEB_DIR)
@@ -1607,15 +1502,14 @@ start_system() {
         echo -e "${GREEN}🎉 PURPLEHOST DZIAŁA!${NC}"
         echo ""
         echo -e "${CYAN}🌐 Adres panelu: http://localhost:8080${NC}"
-        echo -e "${CYAN}💥 Prawdziwe serwery Minecraft z AUTO-PLIKAMI${NC}"
-        echo -e "${CYAN}🖥️  Pełna konsola na całe okno!${NC}"
+        echo -e "${CYAN}🎮 Kliknij 'Zarządzaj' aby otworzyć panel z konsolą${NC}"
         echo ""
         echo -e "${YELLOW}📝 Jak używać:${NC}"
         echo "1. Wejdź na http://localhost:8080"
         echo "2. Utwórz serwer Minecraft"
-        echo "3. Kliknij 'Zarządzaj' → 'Start Serwer'"
-        echo "4. System automatycznie utworzy wszystkie pliki!"
-        echo "5. Ciesz się pełną konsolą Minecraft na całe okno"
+        echo "3. Kliknij 'Zarządzaj' - otworzy się panel z konsolą"
+        echo "4. Kliknij 'Start' aby uruchomić serwer"
+        echo "5. Używaj konsoli do zarządzania serwerem"
         echo "6. Podłącz się z gry: localhost:PORT"
         
         if [ -n "$DISPLAY" ]; then
@@ -1639,7 +1533,7 @@ echo -e "${PURPLE}"
 echo "╔══════════════════════════════════════╗"
 echo "║          🚀 PURPLEHOST PRO           ║"
 echo "║      Prawdziwe Serwery Minecraft     ║"
-echo "║         AUTO-PLIKI + KONSOLA         ║"
+echo "║         PANEL Z KONSOLĄ LIVE         ║"
 echo "╚══════════════════════════════════════╝"
 echo -e "${NC}"
 
