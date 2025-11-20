@@ -84,6 +84,7 @@ import time
 import select
 from datetime import datetime
 import urllib.request
+import base64
 
 # Linki do oficjalnych serwerów Minecraft
 MINECRAFT_VERSIONS = {
@@ -467,6 +468,32 @@ class ServerManager:
             return True
         except:
             return False
+
+    def upload_file(self, server_id, file_path, file_content):
+        """Wgrywa plik do serwera"""
+        server = self.get_server(server_id)
+        if not server:
+            return False
+        
+        full_path = os.path.join(server["path"], file_path)
+        try:
+            os.makedirs(os.path.dirname(full_path), exist_ok=True)
+            
+            # Dekoduj base64 jeśli to plik binarny
+            if file_content.startswith('data:'):
+                # Pomijamy nagłówek data:application/octet-stream;base64,
+                file_content = file_content.split(',')[1]
+                file_data = base64.b64decode(file_content)
+                with open(full_path, 'wb') as f:
+                    f.write(file_data)
+            else:
+                with open(full_path, 'w', encoding='utf-8') as f:
+                    f.write(file_content)
+            
+            return True
+        except Exception as e:
+            print(f"Błąd wgrywania pliku: {e}")
+            return False
     
     def _update_server_data(self, server_id):
         """Aktualizuje dane serwera na podstawie prawdziwej instancji"""
@@ -502,7 +529,7 @@ PYTHON
 }
 
 # =============================================
-# 🌐 PANEL WEB Z KONSOLĄ I PLIKAMI
+# 🌐 PANEL WEB Z KONSOLĄ, PLIKAMI I WGRYWANIEM
 # =============================================
 
 create_web_panel() {
@@ -577,6 +604,9 @@ create_web_panel() {
         }
         .btn-danger {
             background: linear-gradient(135deg, var(--accent), #FF5252);
+        }
+        .btn-warning {
+            background: linear-gradient(135deg, #FFA726, #FB8C00);
         }
         .servers-grid {
             display: grid;
@@ -690,6 +720,28 @@ create_web_panel() {
         .file-item:hover {
             background: rgba(255,255,255,0.1);
         }
+        .file-actions {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 1rem;
+        }
+        .upload-area {
+            border: 2px dashed rgba(255,255,255,0.3);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .upload-area:hover {
+            border-color: var(--primary);
+            background: rgba(139, 92, 246, 0.1);
+        }
+        .upload-area.dragover {
+            border-color: var(--secondary);
+            background: rgba(6, 214, 160, 0.1);
+        }
         .server-management {
             display: grid;
             grid-template-columns: 1fr 1fr;
@@ -786,6 +838,16 @@ create_web_panel() {
                     <!-- Pliki -->
                     <div>
                         <h4 style="margin-bottom:1rem;">📁 Pliki Serwera</h4>
+                        
+                        <div class="file-actions">
+                            <button class="btn btn-warning" onclick="showUploadModal()">
+                                <i class="fas fa-upload"></i> Wgraj Pliki
+                            </button>
+                            <button class="btn" onclick="loadFiles()">
+                                <i class="fas fa-sync"></i> Odśwież
+                            </button>
+                        </div>
+
                         <div class="file-manager" id="fileManager">
                             Ładowanie plików...
                         </div>
@@ -808,9 +870,47 @@ create_web_panel() {
         </div>
     </div>
 
+    <!-- Modal wgrywania plików -->
+    <div id="uploadModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>📤 Wgrywanie Plików</h3>
+                <span onclick="closeModal('uploadModal')" style="cursor:pointer;font-size:1.5rem;">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div style="max-width: 600px; margin: 0 auto;">
+                    <div class="upload-area" id="uploadArea" onclick="document.getElementById('fileInput').click()">
+                        <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.7;"></i>
+                        <h4>Kliknij lub przeciągnij pliki tutaj</h4>
+                        <p>Możesz wgrać pliki .jar, .zip, światy, pluginy i inne</p>
+                    </div>
+                    
+                    <input type="file" id="fileInput" multiple style="display: none;" onchange="handleFileSelect(this.files)">
+                    
+                    <div id="uploadProgress" style="margin-top: 1rem;"></div>
+                    
+                    <div style="margin-top: 2rem;">
+                        <h4>💡 Przykładowe pliki do wgrania:</h4>
+                        <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
+                            <li>Pluginy Bukkit/Spigot (.jar)</li>
+                            <li>Światy Minecraft (folder world/)</li>
+                            <li>Konfiguracje pluginów</li>
+                            <li>Własne skrypty startowe</li>
+                        </ul>
+                    </div>
+                    
+                    <div style="display:flex; gap:1rem; justify-content:flex-end; margin-top: 2rem;">
+                        <button class="btn" onclick="closeModal('uploadModal')">Zamknij</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script>
         let currentServerId = null;
         let consoleInterval = null;
+        let currentPath = '';
 
         // API functions
         async function apiRequest(endpoint, options = {}) {
@@ -953,6 +1053,7 @@ create_web_panel() {
 
         async function loadFiles(path = '') {
             if (!currentServerId) return;
+            currentPath = path;
             const files = await apiRequest('/servers/' + currentServerId + '/files?path=' + encodeURIComponent(path));
             
             const fileManager = document.getElementById('fileManager');
@@ -961,7 +1062,22 @@ create_web_panel() {
                 return;
             }
 
-            fileManager.innerHTML = files.map(file => `
+            let breadcrumbs = '';
+            if (path) {
+                const parts = path.split('/').filter(p => p);
+                let current = '';
+                breadcrumbs = `<div style="margin-bottom: 1rem;">
+                    <span class="file-item" onclick="loadFiles('')"><i class="fas fa-home"></i> Główny</span>`;
+                
+                parts.forEach((part, index) => {
+                    current += (current ? '/' : '') + part;
+                    const isLast = index === parts.length - 1;
+                    breadcrumbs += ` / <span class="file-item" onclick="loadFiles('${current}')" style="${isLast ? 'font-weight: bold;' : ''}">${part}</span>`;
+                });
+                breadcrumbs += '</div>';
+            }
+
+            fileManager.innerHTML = breadcrumbs + files.map(file => `
                 <div class="file-item" onclick="${file.is_directory ? `loadFiles('${file.path}')` : `viewFile('${file.path}')`}">
                     <i class="fas fa-${file.is_directory ? 'folder' : 'file'}"></i>
                     <span>${file.name}</span>
@@ -1010,6 +1126,122 @@ create_web_panel() {
             loadServers();
         }
 
+        // Upload functions
+        function showUploadModal() {
+            document.getElementById('uploadModal').style.display = 'block';
+        }
+
+        function handleFileSelect(files) {
+            const progress = document.getElementById('uploadProgress');
+            progress.innerHTML = '';
+            
+            Array.from(files).forEach((file, index) => {
+                uploadFile(file, index, files.length);
+            });
+        }
+
+        async function uploadFile(file, index, total) {
+            const progress = document.getElementById('uploadProgress');
+            const progressItem = document.createElement('div');
+            progressItem.innerHTML = `<div style="margin-bottom: 0.5rem;">
+                <strong>${file.name}</strong> (${formatFileSize(file.size)})
+                <div id="progress-${index}" style="background: #333; border-radius: 4px; margin-top: 0.25rem;">
+                    <div style="background: var(--secondary); height: 4px; width: 0%; border-radius: 4px; transition: width 0.3s;"></div>
+                </div>
+            </div>`;
+            progress.appendChild(progressItem);
+            
+            try {
+                const reader = new FileReader();
+                
+                reader.onload = async function(e) {
+                    // Dla plików binarnych używamy base64
+                    const isBinary = file.type && !file.type.startsWith('text/');
+                    let fileContent;
+                    
+                    if (isBinary) {
+                        fileContent = 'data:application/octet-stream;base64,' + btoa(
+                            new Uint8Array(e.target.result).reduce((data, byte) => data + String.fromCharCode(byte), '')
+                        );
+                    } else {
+                        fileContent = e.target.result;
+                    }
+                    
+                    // Ścieżka docelowa
+                    const targetPath = currentPath ? currentPath + '/' + file.name : file.name;
+                    
+                    const result = await apiRequest('/servers/' + currentServerId + '/upload', {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            file_path: targetPath,
+                            file_content: fileContent
+                        })
+                    });
+                    
+                    if (result && result.success) {
+                        document.querySelector(`#progress-${index} > div`).style.width = '100%';
+                        progressItem.innerHTML += '<span style="color: var(--secondary);"> ✅ Wgrano pomyślnie</span>';
+                        
+                        // Odśwież listę plików po ostatnim pliku
+                        if (index === total - 1) {
+                            setTimeout(() => {
+                                loadFiles(currentPath);
+                                closeModal('uploadModal');
+                            }, 1000);
+                        }
+                    } else {
+                        progressItem.innerHTML += '<span style="color: var(--accent);"> ❌ Błąd wgrywania</span>';
+                    }
+                };
+                
+                if (file.type && !file.type.startsWith('text/')) {
+                    reader.readAsArrayBuffer(file);
+                } else {
+                    reader.readAsText(file);
+                }
+                
+            } catch (error) {
+                console.error('Błąd wgrywania:', error);
+                progressItem.innerHTML += '<span style="color: var(--accent);"> ❌ Błąd wgrywania</span>';
+            }
+        }
+
+        // Drag and drop
+        document.addEventListener('DOMContentLoaded', function() {
+            const uploadArea = document.getElementById('uploadArea');
+            
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadArea.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                uploadArea.classList.add('dragover');
+            }
+            
+            function unhighlight() {
+                uploadArea.classList.remove('dragover');
+            }
+            
+            uploadArea.addEventListener('drop', function(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                handleFileSelect(files);
+            });
+        });
+
         // Auto-odświeżanie listy serwerów
         loadServers();
         setInterval(loadServers, 5000);
@@ -1026,7 +1258,7 @@ HTML
 }
 
 # =============================================
-# 🔄 SERWER WEB Z API
+# 🔄 SERWER WEB Z API I WGRYWANIEM PLIKÓW
 # =============================================
 
 create_web_server() {
@@ -1137,6 +1369,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                                 self.send_json({'success': success})
                             else:
                                 self.send_json({'error': 'No command'}, 400)
+                    
+                    elif len(path_parts) == 6 and path_parts[4] == 'upload':
+                        # POST /api/servers/{id}/upload
+                        if self.command == 'POST':
+                            content_length = int(self.headers['Content-Length'])
+                            body = self.rfile.read(content_length).decode()
+                            data = json.loads(body)
+                            file_path = data.get('file_path', '')
+                            file_content = data.get('file_content', '')
+                            
+                            if file_path and file_content:
+                                success = server_manager.upload_file(server_id, file_path, file_content)
+                                self.send_json({'success': success})
+                            else:
+                                self.send_json({'error': 'Missing file data'}, 400)
                 
                 else:
                     self.send_error(404)
@@ -1157,7 +1404,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         print(f"🌐 {self.address_string()} - {format % args}")
 
 print(f"🚀 PurpleHost starting on http://localhost:{PORT}")
-print("💥 PRAWDZIWE SERWERY MINECRAFT")
+print("💥 PRAWDZIWE SERWERY MINECRAFT + WGRYWANIE PLIKÓW")
 print("📁 Serving from:", WEB_DIR)
 
 os.chdir(WEB_DIR)
@@ -1200,13 +1447,15 @@ start_system() {
         echo ""
         echo -e "${CYAN}🌐 Adres panelu: http://localhost:8080${NC}"
         echo -e "${CYAN}💥 Prawdziwe serwery Minecraft z konsolą i plikami${NC}"
+        echo -e "${CYAN}📤 Teraz z wgrywaniem plików!${NC}"
         echo ""
         echo -e "${YELLOW}📝 Jak używać:${NC}"
         echo "1. Wejdź na http://localhost:8080"
         echo "2. Utwórz serwer Minecraft"
         echo "3. Uruchom serwer - pobierze się server.jar"
         echo "4. Wejdź do zarządzania - prawdziwa konsola!"
-        echo "5. Podłącz się z gry: localhost:PORT"
+        echo "5. Użyj przycisku 'Wgraj Pliki' aby dodać pluginy, światy, etc."
+        echo "6. Podłącz się z gry: localhost:PORT"
         
         if [ -n "$DISPLAY" ]; then
             xdg-open "http://localhost:8080" 2>/dev/null &
@@ -1229,6 +1478,7 @@ echo -e "${PURPLE}"
 echo "╔══════════════════════════════════════╗"
 echo "║          🚀 PURPLEHOST PRO           ║"
 echo "║      Prawdziwe Serwery Minecraft     ║"
+echo "║           + Wgrywanie Plików         ║"
 echo "╚══════════════════════════════════════╝"
 echo -e "${NC}"
 
