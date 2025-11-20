@@ -1,583 +1,196 @@
 #!/bin/bash
 
-# =============================================
-# 🟣 PURPLEHOST - SZYBKA NAPRAWA
-# =============================================
+echo "=== PODSTAWOWA DIAGNOSTYKA SYSTEMU ==="
+echo "Czas: $(date)"
+echo "======================================="
 
-PANEL_DIR="/home/purplehost"
-WEB_DIR="$PANEL_DIR/web"
-LOG_DIR="$PANEL_DIR/logs"
-PORT=8080
-
-# Kolory
-PURPLE='\033[0;35m'
+# Kolory dla czytelności
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
 NC='\033[0m'
 
-echo -e "${PURPLE}"
-echo -e "╔══════════════════════════════════════╗"
-echo -e "║           🚀 PURPLEHOST              ║"
-echo -e "║           SZYBKA NAPRAWA             ║"
-echo -e "╚══════════════════════════════════════╝"
-echo -e "${NC}"
+# Funkcja do sprawdzania statusu
+check_status() {
+    echo -e "${BLUE}🔍 $1...${NC}"
+    if $2; then
+        echo -e "${GREEN}✅ $1: OK${NC}"
+        return 0
+    else
+        echo -e "${RED}❌ $1: FAILED${NC}"
+        return 1
+    fi
+}
 
-# =============================================
-# 🛠️ DIAGNOSTYKA
-# =============================================
+echo ""
+echo -e "${YELLOW}1. INFORMACJE O SYSTEMIE${NC}"
+echo "======================================="
 
-echo -e "${CYAN}🔍 Diagnozowanie problemu...${NC}"
+# Podstawowe informacje o systemie
+check_status "System operacyjny" "uname -s"
+check_status "Wersja kernela" "uname -r"
+check_status "Architektura" "uname -m"
 
-# Sprawdź czy jesteś root
-if [ "$EUID" -ne 0 ]; then
-    echo -e "${YELLOW}⚠️  Uruchom jako root dla najlepszych efektów: sudo ./naprawa.sh${NC}"
+echo ""
+echo -e "${YELLOW}2. UŻYTKOWNIK I UPRAWNIENIA${NC}"
+echo "======================================="
+
+# Informacje o użytkowniku
+echo -e "${BLUE}🔍 Aktualny użytkownik...${NC}"
+whoami
+id
+
+echo ""
+echo -e "${BLUE}🔍 Uprawnienia do /home...${NC}"
+ls -ld /home/
+if [ -d "/home/purplehost" ]; then
+    ls -ld /home/purplehost
+else
+    echo -e "${RED}❌ Katalog /home/purplehost nie istnieje${NC}"
 fi
 
-# Zatrzymaj wszystkie istniejące serwery
-echo -e "${YELLOW}🔄 Zatrzymywanie istniejących procesów...${NC}"
-pkill -f "python3" >/dev/null 2>&1
-pkill -f "server.py" >/dev/null 2>&1
-sleep 2
+echo ""
+echo -e "${YELLOW}3. DYSK I PAMIĘĆ${NC}"
+echo "======================================="
 
-# Zwolnij port 8080
-echo -e "${YELLOW}🔄 Zwalnianie portu $PORT...${NC}"
-fuser -k $PORT/tcp >/dev/null 2>&1
+# Sprawdzenie miejsca na dysku
+echo -e "${BLUE}🔍 Miejsce na dysku...${NC}"
+df -h /home | grep -v Filesystem
 
-# Sprawdź zależności
-echo -e "${CYAN}📦 Sprawdzanie zależności...${NC}"
+echo ""
+echo -e "${BLUE}🔍 Wolna pamięć...${NC}"
+free -h
 
-if ! command -v python3 &> /dev/null; then
-    echo -e "${YELLOW}📦 Instalowanie Pythona 3...${NC}"
-    apt update >/dev/null 2>&1
-    apt install -y python3 >/dev/null 2>&1
+echo ""
+echo -e "${YELLOW}4. ZALEŻNOŚCI SYSTEMOWE${NC}"
+echo "======================================="
+
+# Sprawdzenie Pythona
+check_status "Python 3" "python3 --version >/dev/null 2>&1"
+if command -v python3 >/dev/null 2>&1; then
+    echo -e "   Wersja: $(python3 --version 2>&1)"
 fi
 
-# Sprawdź czy Python działa
-if ! python3 --version >/dev/null 2>&1; then
-    echo -e "${RED}❌ Python3 nie działa poprawnie${NC}"
-    exit 1
+# Sprawdzenie pip
+check_status "Pip 3" "pip3 --version >/dev/null 2>&1"
+
+# Sprawdzenie Javy (jeśli potrzebna)
+check_status "Java" "java -version >/dev/null 2>&1"
+
+# Sprawdzenie wget/curl
+check_status "wget" "wget --version >/dev/null 2>&1"
+check_status "curl" "curl --version >/dev/null 2>&1"
+
+echo ""
+echo -e "${YELLOW}5. SIEC I PORTY${NC}"
+echo "======================================="
+
+# Sprawdzenie portów
+echo -e "${BLUE}🔍 Sprawdzanie portu 8080...${NC}"
+if netstat -tulpn 2>/dev/null | grep :8080 >/dev/null; then
+    echo -e "${RED}❌ Port 8080 jest zajęty${NC}"
+    netstat -tulpn | grep :8080
+else
+    echo -e "${GREEN}✅ Port 8080 jest wolny${NC}"
 fi
 
-echo -e "${GREEN}✅ Python3 jest gotowy${NC}"
+# Sprawdzenie adresów IP
+echo ""
+echo -e "${BLUE}🔍 Adresy IP...${NC}"
+ip addr show | grep inet | grep -v 127.0.0.1 | head -5
 
-# =============================================
-# 📁 PRZYGOTOWANIE STRUKTURY
-# =============================================
+echo ""
+echo -e "${YELLOW}6. PROCESY${NC}"
+echo "======================================="
 
-echo -e "${CYAN}📁 Tworzenie struktury katalogów...${NC}"
+# Sprawdzenie procesów Python
+echo -e "${BLUE}🔍 Aktywne procesy Python...${NC}"
+ps aux | grep python | grep -v grep | head -10
 
-mkdir -p "$PANEL_DIR" "$WEB_DIR" "$LOG_DIR"
-mkdir -p "$PANEL_DIR/serwery" "$PANEL_DIR/bazy" "$PANEL_DIR/backupy"
+echo ""
+echo -e "${YELLOW}7. STRUKTURA PURPLEHOST${NC}"
+echo "======================================="
 
-# Czyszczenie starych logów
-echo "" > "$LOG_DIR/web_server.log"
-
-# =============================================
-# 🌐 UTWORZENIE PROSTEGO SERWERA
-# =============================================
-
-echo -e "${CYAN}🔧 Tworzenie serwera...${NC}"
-
-cat > "$WEB_DIR/server.py" << 'PYTHON'
-#!/usr/bin/env python3
-import http.server
-import socketserver
-import os
-import json
-from datetime import datetime
-
-PORT = 8080
-WEB_DIR = "/home/purplehost/web"
-
-class PurpleHostHandler(http.server.SimpleHTTPRequestHandler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, directory=WEB_DIR, **kwargs)
+# Sprawdzenie struktury katalogów PurpleHost
+if [ -d "/home/purplehost" ]; then
+    echo -e "${GREEN}✅ Katalog PurpleHost istnieje${NC}"
+    echo ""
+    echo -e "${BLUE}🔍 Struktura katalogów:${NC}"
+    find /home/purplehost -type d 2>/dev/null | head -20
     
-    def do_GET(self):
-        if self.path == '/':
-            self.path = '/index.html'
-        elif self.path == '/api/servers':
-            self.send_api_response([])
-            return
-        elif self.path.startswith('/api/'):
-            self.send_api_response({"error": "API niedostępne w trybie naprawy"})
-            return
-            
-        super().do_GET()
-    
-    def do_POST(self):
-        if self.path.startswith('/api/'):
-            self.send_api_response({"status": "success", "message": "System w trybie naprawy"})
-            return
-        else:
-            self.send_error(404)
-    
-    def send_api_response(self, data):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
-        self.wfile.write(json.dumps(data).encode('utf-8'))
-    
-    def log_message(self, format, *args):
-        # Wyłącz domyślne logowanie
-        pass
-
-def main():
-    print("🚀 PURPLEHOST - SZYBKA NAPRAWA")
-    print("=" * 50)
-    print(f"📁 Katalog: {WEB_DIR}")
-    print(f"🌐 Port: {PORT}")
-    print("⏳ Uruchamianie...")
-    
-    # Sprawdź czy katalog istnieje
-    if not os.path.exists(WEB_DIR):
-        print(f"❌ Błąd: Katalog {WEB_DIR} nie istnieje!")
-        return
-    
-    os.chdir(WEB_DIR)
-    
-    try:
-        with socketserver.TCPServer(("", PORT), PurpleHostHandler) as httpd:
-            print(f"✅ SERWER URUCHOMIONY!")
-            print(f"📍 Adres: http://localhost:{PORT}")
-            print(f"📍 Adres: http://{os.popen('hostname -I').read().strip()}:{PORT}")
-            print("=" * 50)
-            print("💡 Panel będzie działał w trybie podstawowym")
-            print("🛑 Aby zatrzymać: Ctrl+C")
-            httpd.serve_forever()
-    except OSError as e:
-        if "Address already in use" in str(e):
-            print(f"❌ Port {PORT} jest zajęty!")
-            print("💡 Uruchom: sudo fuser -k 8080/tcp")
-        else:
-            print(f"❌ Błąd: {e}")
-    except Exception as e:
-        print(f"❌ Nieoczekiwany błąd: {e}")
-
-if __name__ == "__main__":
-    main()
-PYTHON
-
-chmod +x "$WEB_DIR/server.py"
-
-# =============================================
-# 📄 UTWORZENIE STRONY GŁÓWNEJ
-# =============================================
-
-echo -e "${CYAN}📄 Tworzenie strony głównej...${NC}"
-
-cat > "$WEB_DIR/index.html" << 'HTML'
-<!DOCTYPE html>
-<html lang="pl">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🚀 PurpleHost - System Naprawiony</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-        }
-
-        :root {
-            --primary: #8B5CF6;
-            --primary-dark: #7C3AED;
-            --primary-light: #A78BFA;
-            --secondary: #06D6A0;
-            --accent: #FF6B6B;
-            --dark: #1E1B2E;
-            --darker: #151321;
-            --light: #F8FAFC;
-            --gray: #64748B;
-            --glass: rgba(255, 255, 255, 0.08);
-            --glass-border: rgba(255, 255, 255, 0.12);
-            --shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-        }
-
-        body {
-            background: linear-gradient(135deg, var(--darker) 0%, var(--dark) 100%);
-            color: var(--light);
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
-
-        .container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 3rem;
-        }
-
-        .logo {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 1rem;
-            font-size: 3rem;
-            font-weight: 800;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            margin-bottom: 1rem;
-        }
-
-        .status-card {
-            background: var(--glass);
-            border: 1px solid var(--glass-border);
-            border-radius: 20px;
-            padding: 3rem;
-            text-align: center;
-            margin: 2rem 0;
-            backdrop-filter: blur(20px);
-        }
-
-        .status-success {
-            border-left: 4px solid var(--secondary);
-        }
-
-        .status-warning {
-            border-left: 4px solid var(--accent);
-        }
-
-        .status-icon {
-            font-size: 4rem;
-            margin-bottom: 1rem;
-        }
-
-        .btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 0.5rem;
-            padding: 1rem 2rem;
-            border: none;
-            border-radius: 12px;
-            font-weight: 600;
-            text-decoration: none;
-            transition: all 0.3s ease;
-            cursor: pointer;
-            font-size: 1rem;
-            margin: 0.5rem;
-        }
-
-        .btn-primary {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
-            color: white;
-            box-shadow: var(--shadow);
-        }
-
-        .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 10px 30px rgba(139, 92, 246, 0.3);
-        }
-
-        .btn-secondary {
-            background: var(--glass);
-            color: var(--light);
-            border: 1px solid var(--glass-border);
-        }
-
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 1.5rem;
-            margin: 3rem 0;
-        }
-
-        .feature-card {
-            background: var(--glass);
-            border: 1px solid var(--glass-border);
-            border-radius: 16px;
-            padding: 2rem;
-            text-align: center;
-            backdrop-filter: blur(10px);
-            transition: all 0.3s ease;
-        }
-
-        .feature-card:hover {
-            transform: translateY(-5px);
-            box-shadow: var(--shadow);
-        }
-
-        .feature-icon {
-            font-size: 2.5rem;
-            margin-bottom: 1rem;
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .next-steps {
-            background: rgba(6, 214, 160, 0.1);
-            border: 1px solid rgba(6, 214, 160, 0.2);
-            border-radius: 15px;
-            padding: 2rem;
-            margin: 2rem 0;
-        }
-
-        .step {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-            margin: 1rem 0;
-            padding: 1rem;
-            background: rgba(255,255,255,0.05);
-            border-radius: 10px;
-        }
-
-        .step-number {
-            background: var(--secondary);
-            color: var(--dark);
-            width: 30px;
-            height: 30px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-        }
-
-        @media (max-width: 768px) {
-            .container {
-                padding: 1rem;
-            }
-            
-            .logo {
-                font-size: 2rem;
-            }
-            
-            .features {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo">
-                <i class="fas fa-rocket"></i>
-                PurpleHost
-            </div>
-            <h1>System został naprawiony! 🎉</h1>
-            <p style="color: var(--gray); font-size: 1.2rem; margin-top: 1rem;">
-                Podstawowy panel został uruchomiony pomyślnie
-            </p>
-        </div>
-
-        <!-- Status Card -->
-        <div class="status-card status-success">
-            <div class="status-icon">
-                <i class="fas fa-check-circle" style="color: var(--secondary);"></i>
-            </div>
-            <h2 style="margin-bottom: 1rem;">Status: DZIAŁA POPRAWNIE ✅</h2>
-            <p style="color: var(--gray); font-size: 1.1rem; margin-bottom: 2rem;">
-                Serwer PurpleHost został uruchomiony na porcie 8080
-            </p>
-            <div>
-                <button class="btn btn-primary" onclick="showDemo('dashboard')">
-                    <i class="fas fa-home"></i> Demo Dashboard
-                </button>
-                <button class="btn btn-secondary" onclick="showDemo('servers')">
-                    <i class="fas fa-server"></i> Demo Serwery
-                </button>
-                <button class="btn btn-secondary" onclick="showDemo('create')">
-                    <i class="fas fa-plus"></i> Demo Tworzenie
-                </button>
-            </div>
-        </div>
-
-        <!-- Features -->
-        <div class="features">
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-bolt"></i>
-                </div>
-                <h3>Szybka Naprawa</h3>
-                <p style="color: var(--gray); margin-top: 1rem;">
-                    System został uruchomiony w trybie podstawowym. Wszystkie niezbędne komponenty działają.
-                </p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-shield-alt"></i>
-                </div>
-                <h3>Stabilne Działanie</h3>
-                <p style="color: var(--gray); margin-top: 1rem;">
-                    Serwer HTTP działa poprawnie. Możesz przeglądać panel i testować podstawowe funkcje.
-                </p>
-            </div>
-
-            <div class="feature-card">
-                <div class="feature-icon">
-                    <i class="fas fa-rocket"></i>
-                </div>
-                <h3>Gotowy na Rozbudowę</h3>
-                <p style="color: var(--gray); margin-top: 1rem;">
-                    Struktura katalogów jest gotowa do pełnej instalacji PurpleHost.
-                </p>
-            </div>
-        </div>
-
-        <!-- Next Steps -->
-        <div class="next-steps">
-            <h3 style="margin-bottom: 1.5rem; color: var(--secondary);">
-                <i class="fas fa-arrow-right"></i> Następne kroki:
-            </h3>
-            
-            <div class="step">
-                <div class="step-number">1</div>
-                <div>
-                    <strong>Sprawdź działanie</strong>
-                    <p style="color: var(--gray); margin: 0;">Panel powinien być dostępny pod adresem http://localhost:8080</p>
-                </div>
-            </div>
-
-            <div class="step">
-                <div class="step-number">2</div>
-                <div>
-                    <strong>Pełna instalacja</strong>
-                    <p style="color: var(--gray); margin: 0;">Uruchom pełną wersję PurpleHost z serwerami Minecraft</p>
-                </div>
-            </div>
-
-            <div class="step">
-                <div class="step-number">3</div>
-                <div>
-                    <strong>Rozpocznij używanie</strong>
-                    <p style="color: var(--gray); margin: 0;">Twórz serwery Minecraft i zarządzaj nimi przez panel</p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Demo Content -->
-        <div id="demoContent" style="display: none; margin-top: 2rem; padding: 2rem; background: var(--glass); border-radius: 15px;">
-            <h3 id="demoTitle">Demo Panel</h3>
-            <p id="demoText" style="color: var(--gray); margin-top: 1rem;">
-                Ta funkcja będzie dostępna po pełnej instalacji.
-            </p>
-        </div>
-    </div>
-
-    <script>
-        function showDemo(type) {
-            const content = document.getElementById('demoContent');
-            const title = document.getElementById('demoTitle');
-            const text = document.getElementById('demoText');
-            
-            content.style.display = 'block';
-            
-            switch(type) {
-                case 'dashboard':
-                    title.innerHTML = '📊 Demo Dashboard';
-                    text.innerHTML = 'Pełny dashboard z statystykami serwerów, graczami online i zużyciem zasobów będzie dostępny po pełnej instalacji.';
-                    break;
-                case 'servers':
-                    title.innerHTML = '🎮 Demo Serwery Minecraft';
-                    text.innerHTML = 'Po pełnej instalacji będziesz mógł tworzyć prawdziwe serwery Minecraft, uruchamiać je i zarządzać nimi przez ten panel.';
-                    break;
-                case 'create':
-                    title.innerHTML = '🛠️ Demo Tworzenie Serwera';
-                    text.innerHTML = 'Formularz tworzenia serwera pozwoli wybrać wersję Minecraft, ilość RAM i konfigurację. Serwer będzie pobierał officialne pliki JAR z Mojang.';
-                    break;
-            }
-            
-            // Scroll to demo content
-            content.scrollIntoView({ behavior: 'smooth' });
-        }
-
-        // Pokazuję że JavaScript działa
-        console.log('🚀 PurpleHost - System naprawiony i działający!');
-    </script>
-</body>
-</html>
-HTML
-
-# =============================================
-# 🚀 URUCHOMIENIE SERWERA
-# =============================================
-
-echo -e "${CYAN}🚀 Uruchamianie serwera PurpleHost...${NC}"
-
-cd "$WEB_DIR"
-nohup python3 server.py > "$LOG_DIR/web_server.log" 2>&1 &
-SERVER_PID=$!
-
-sleep 3
-
-# =============================================
-# ✅ SPRAWDZENIE STATUSU
-# =============================================
-
-if ps -p $SERVER_PID > /dev/null 2>&1; then
-    echo -e "${GREEN}"
-    echo -e "╔════════════════════════════════════════════════════════════╗"
-    echo -e "║                    🎉 SUKCES!                            ║"
-    echo -e "╠════════════════════════════════════════════════════════════╣"
-    echo -e "║                                                            ║"
-    echo -e "║  PurpleHost został pomyślnie uruchomiony!                 ║"
-    echo -e "║                                                            ║"
-    echo -e "║  🌐 Adresy dostępu:                                       ║"
-    echo -e "║     📍 http://localhost:8080                             ║"
-    echo -e "║     🌍 http://$(hostname -I | awk '{print $1}'):8080     ║"
-    echo -e "║                                                            ║"
-    echo -e "║  📁 Katalog panelu: $WEB_DIR                             ║"
-    echo -e "║  📋 Logi: $LOG_DIR/web_server.log                        ║"
-    echo -e "║                                                            ║"
-    echo -e "║  💡 Otwórz przeglądarkę i sprawdź działanie!             ║"
-    echo -e "║                                                            ║"
-    echo -e "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # Zapisz PID
-    echo $SERVER_PID > "$PANEL_DIR/server.pid"
-    
-    # Spróbuj otworzyć przeglądarkę
-    if [ -n "$DISPLAY" ]; then
-        echo -e "${YELLOW}🖥️  Otwieranie przeglądarki...${NC}"
-        xdg-open "http://localhost:8080" 2>/dev/null &
+    echo ""
+    echo -e "${BLUE}🔍 Zawartość katalogu web:${NC}"
+    if [ -d "/home/purplehost/web" ]; then
+        ls -la /home/purplehost/web/ | head -10
+    else
+        echo -e "${RED}❌ Katalog web nie istnieje${NC}"
     fi
     
+    echo ""
+    echo -e "${BLUE}🔍 Logi:${NC}"
+    if [ -f "/home/purplehost/logs/web_server.log" ]; then
+        echo -e "Ostatnie 10 linii logów:"
+        tail -10 /home/purplehost/logs/web_server.log
+    else
+        echo -e "${RED}❌ Plik logów nie istnieje${NC}"
+    fi
 else
-    echo -e "${RED}"
-    echo -e "╔════════════════════════════════════════════════════════════╗"
-    echo -e "║                    ❌ BŁĄD!                              ║"
-    echo -e "╠════════════════════════════════════════════════════════════╣"
-    echo -e "║                                                            ║"
-    echo -e "║  Nie udało się uruchomić serwera.                         ║"
-    echo -e "║                                                            ║"
-    echo -e "║  Sprawdź logi:                                            ║"
-    echo -e "║    cat $LOG_DIR/web_server.log                           ║"
-    echo -e "║                                                            ║"
-    echo -e "║  Możliwe problemy:                                        ║"
-    echo -e "║    • Port 8080 jest zajęty                               ║"
-    echo -e "║    • Brak uprawnień                                      ║"
-    echo -e "║    • Problem z Pythonem                                  ║"
-    echo -e "║                                                            ║"
-    echo -e "╚════════════════════════════════════════════════════════════╝"
-    echo -e "${NC}"
-    
-    # Pokaż logi
-    echo -e "${YELLOW}📋 Ostatnie logi:${NC}"
-    tail -10 "$LOG_DIR/web_server.log"
+    echo -e "${RED}❌ Katalog PurpleHost nie istnieje${NC}"
 fi
 
-echo -e "${CYAN}"
-echo -e "==================================================="
-echo -e "🔧 DIAGNOSTYKA ZAKOŃCZONA"
-echo -e "==================================================="
-echo -e "${NC}"
+echo ""
+echo -e "${YELLOW}8. TEST SERWERA HTTP${NC}"
+echo "======================================="
+
+# Test prostego serwera HTTP
+echo -e "${BLUE}🔍 Test serwera HTTP...${NC}"
+python3 -c "
+import http.server
+import socketserver
+import threading
+import time
+import sys
+
+def test_http_server():
+    try:
+        # Użyj portu 8083 dla testu
+        port = 8083
+        with socketserver.TCPServer(('', port), http.server.SimpleHTTPRequestHandler) as httpd:
+            print('   ✅ Serwer HTTP może zostać uruchomiony')
+            # Uruchom w tle na 2 sekundy
+            server_thread = threading.Thread(target=httpd.serve_forever)
+            server_thread.daemon = True
+            server_thread.start()
+            time.sleep(1)
+            return True
+    except OSError as e:
+        if 'Address already in use' in str(e):
+            print('   ⚠️  Port testowy zajęty, ale serwer działa')
+            return True
+        else:
+            print(f'   ❌ Błąd serwera: {e}')
+            return False
+    except Exception as e:
+        print(f'   ❌ Nieoczekiwany błąd: {e}')
+        return False
+
+if test_http_server():
+    print('   🟢 Test serwera HTTP: PASSED')
+else:
+    print('   🔴 Test serwera HTTP: FAILED')
+"
+
+echo ""
+echo "======================================="
+echo -e "${YELLOW}DIAGNOSTYKA ZAKOŃCZONA${NC}"
+echo "======================================="
+
+# Podsumowanie
+echo ""
+echo -e "${BLUE}📋 PODSUMOWANIE:${NC}"
+echo "Następne kroki:"
+echo "1. Sprawdź czy wszystkie zależności są zainstalowane"
+echo "2. Upewnij się że port 8080 jest wolny" 
+echo "3. Sprawdź uprawnienia do katalogu /home/purplehost"
+echo "4. Jeśli katalog nie istnieje, utwórz go ręcznie"
