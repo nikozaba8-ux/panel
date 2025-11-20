@@ -1,196 +1,50 @@
 #!/bin/bash
 
-echo "=== PODSTAWOWA DIAGNOSTYKA SYSTEMU ==="
-echo "Czas: $(date)"
-echo "======================================="
+# Ręczne tworzenie katalogów krok po kroku
+echo "=== RĘCZNE TWORZENIE KATALOGÓW ==="
 
-# Kolory dla czytelności
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Sprawdź gdzie jesteś
+echo "Obecny katalog: $(pwd)"
+echo "Użytkownik: $(whoami)"
 
-# Funkcja do sprawdzania statusu
-check_status() {
-    echo -e "${BLUE}🔍 $1...${NC}"
-    if $2; then
-        echo -e "${GREEN}✅ $1: OK${NC}"
-        return 0
-    else
-        echo -e "${RED}❌ $1: FAILED${NC}"
-        return 1
-    fi
-}
+# Spróbuj utworzyć w różnych lokalizacjach
+LOCATIONS=("/home/purplehost" "/tmp/purplehost" "$(pwd)/purplehost")
 
-echo ""
-echo -e "${YELLOW}1. INFORMACJE O SYSTEMIE${NC}"
-echo "======================================="
-
-# Podstawowe informacje o systemie
-check_status "System operacyjny" "uname -s"
-check_status "Wersja kernela" "uname -r"
-check_status "Architektura" "uname -m"
-
-echo ""
-echo -e "${YELLOW}2. UŻYTKOWNIK I UPRAWNIENIA${NC}"
-echo "======================================="
-
-# Informacje o użytkowniku
-echo -e "${BLUE}🔍 Aktualny użytkownik...${NC}"
-whoami
-id
-
-echo ""
-echo -e "${BLUE}🔍 Uprawnienia do /home...${NC}"
-ls -ld /home/
-if [ -d "/home/purplehost" ]; then
-    ls -ld /home/purplehost
-else
-    echo -e "${RED}❌ Katalog /home/purplehost nie istnieje${NC}"
-fi
-
-echo ""
-echo -e "${YELLOW}3. DYSK I PAMIĘĆ${NC}"
-echo "======================================="
-
-# Sprawdzenie miejsca na dysku
-echo -e "${BLUE}🔍 Miejsce na dysku...${NC}"
-df -h /home | grep -v Filesystem
-
-echo ""
-echo -e "${BLUE}🔍 Wolna pamięć...${NC}"
-free -h
-
-echo ""
-echo -e "${YELLOW}4. ZALEŻNOŚCI SYSTEMOWE${NC}"
-echo "======================================="
-
-# Sprawdzenie Pythona
-check_status "Python 3" "python3 --version >/dev/null 2>&1"
-if command -v python3 >/dev/null 2>&1; then
-    echo -e "   Wersja: $(python3 --version 2>&1)"
-fi
-
-# Sprawdzenie pip
-check_status "Pip 3" "pip3 --version >/dev/null 2>&1"
-
-# Sprawdzenie Javy (jeśli potrzebna)
-check_status "Java" "java -version >/dev/null 2>&1"
-
-# Sprawdzenie wget/curl
-check_status "wget" "wget --version >/dev/null 2>&1"
-check_status "curl" "curl --version >/dev/null 2>&1"
-
-echo ""
-echo -e "${YELLOW}5. SIEC I PORTY${NC}"
-echo "======================================="
-
-# Sprawdzenie portów
-echo -e "${BLUE}🔍 Sprawdzanie portu 8080...${NC}"
-if netstat -tulpn 2>/dev/null | grep :8080 >/dev/null; then
-    echo -e "${RED}❌ Port 8080 jest zajęty${NC}"
-    netstat -tulpn | grep :8080
-else
-    echo -e "${GREEN}✅ Port 8080 jest wolny${NC}"
-fi
-
-# Sprawdzenie adresów IP
-echo ""
-echo -e "${BLUE}🔍 Adresy IP...${NC}"
-ip addr show | grep inet | grep -v 127.0.0.1 | head -5
-
-echo ""
-echo -e "${YELLOW}6. PROCESY${NC}"
-echo "======================================="
-
-# Sprawdzenie procesów Python
-echo -e "${BLUE}🔍 Aktywne procesy Python...${NC}"
-ps aux | grep python | grep -v grep | head -10
-
-echo ""
-echo -e "${YELLOW}7. STRUKTURA PURPLEHOST${NC}"
-echo "======================================="
-
-# Sprawdzenie struktury katalogów PurpleHost
-if [ -d "/home/purplehost" ]; then
-    echo -e "${GREEN}✅ Katalog PurpleHost istnieje${NC}"
+for location in "${LOCATIONS[@]}"; do
     echo ""
-    echo -e "${BLUE}🔍 Struktura katalogów:${NC}"
-    find /home/purplehost -type d 2>/dev/null | head -20
+    echo "🔧 Próba utworzenia w: $location"
     
-    echo ""
-    echo -e "${BLUE}🔍 Zawartość katalogu web:${NC}"
-    if [ -d "/home/purplehost/web" ]; then
-        ls -la /home/purplehost/web/ | head -10
+    if mkdir -p "$location" 2>/dev/null; then
+        echo "✅ Sukces! Używam: $location"
+        PANEL_DIR="$location"
+        break
     else
-        echo -e "${RED}❌ Katalog web nie istnieje${NC}"
+        echo "❌ Nie udało się utworzyć"
     fi
-    
-    echo ""
-    echo -e "${BLUE}🔍 Logi:${NC}"
-    if [ -f "/home/purplehost/logs/web_server.log" ]; then
-        echo -e "Ostatnie 10 linii logów:"
-        tail -10 /home/purplehost/logs/web_server.log
-    else
-        echo -e "${RED}❌ Plik logów nie istnieje${NC}"
-    fi
-else
-    echo -e "${RED}❌ Katalog PurpleHost nie istnieje${NC}"
+done
+
+if [ -z "$PANEL_DIR" ]; then
+    echo "🚨 CRITICAL: Nie udało się utworzyć żadnego katalogu!"
+    echo "Spróbuj utworzyć ręcznie: mkdir /home/purplehost"
+    exit 1
 fi
 
+# Utwórz strukturę
 echo ""
-echo -e "${YELLOW}8. TEST SERWERA HTTP${NC}"
-echo "======================================="
+echo "📁 Tworzenie struktury w: $PANEL_DIR"
+mkdir -p "$PANEL_DIR"/{web,serwery,bazy,backupy,logs}
 
-# Test prostego serwera HTTP
-echo -e "${BLUE}🔍 Test serwera HTTP...${NC}"
-python3 -c "
-import http.server
-import socketserver
-import threading
-import time
-import sys
+# Prosty testowy plik HTML
+cat > "$PANEL_DIR/web/index.html" << 'HTML'
+<h1>PurpleHost Test</h1>
+<p>Jeśli widzisz tę wiadomość, struktura katalogów działa!</p>
+<p>Katalog: <?php echo __DIR__; ?></p>
+HTML
 
-def test_http_server():
-    try:
-        # Użyj portu 8083 dla testu
-        port = 8083
-        with socketserver.TCPServer(('', port), http.server.SimpleHTTPRequestHandler) as httpd:
-            print('   ✅ Serwer HTTP może zostać uruchomiony')
-            # Uruchom w tle na 2 sekundy
-            server_thread = threading.Thread(target=httpd.serve_forever)
-            server_thread.daemon = True
-            server_thread.start()
-            time.sleep(1)
-            return True
-    except OSError as e:
-        if 'Address already in use' in str(e):
-            print('   ⚠️  Port testowy zajęty, ale serwer działa')
-            return True
-        else:
-            print(f'   ❌ Błąd serwera: {e}')
-            return False
-    except Exception as e:
-        print(f'   ❌ Nieoczekiwany błąd: {e}')
-        return False
-
-if test_http_server():
-    print('   🟢 Test serwera HTTP: PASSED')
-else:
-    print('   🔴 Test serwera HTTP: FAILED')
-"
+# Sprawdź
+echo ""
+echo "📋 Utworzona struktura:"
+find "$PANEL_DIR" -type d | sort
 
 echo ""
-echo "======================================="
-echo -e "${YELLOW}DIAGNOSTYKA ZAKOŃCZONA${NC}"
-echo "======================================="
-
-# Podsumowanie
-echo ""
-echo -e "${BLUE}📋 PODSUMOWANIE:${NC}"
-echo "Następne kroki:"
-echo "1. Sprawdź czy wszystkie zależności są zainstalowane"
-echo "2. Upewnij się że port 8080 jest wolny" 
-echo "3. Sprawdź uprawnienia do katalogu /home/purplehost"
-echo "4. Jeśli katalog nie istnieje, utwórz go ręcznie"
+echo "🎯 Ścieżka do użycia w skrypcie: $PANEL_DIR"
