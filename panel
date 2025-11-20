@@ -33,6 +33,11 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_DIR/panel.log"
 }
 
+error() {
+    echo -e "${RED}❌ $1${NC}"
+    log "BŁĄD: $1"
+}
+
 setup_directories() {
     echo -e "${PURPLE}📁 Tworzenie struktur katalogów...${NC}"
     mkdir -p "$PANEL_DIR" "$WEB_DIR" "$SERVER_DIR" "$DB_DIR" "$BACKUP_DIR" "$LOG_DIR" "$NODE_DIR" "$PLAYIT_DIR"
@@ -46,7 +51,7 @@ check_dependencies() {
     if ! command -v python3 &> /dev/null; then
         echo -e "${YELLOW}📦 Instalowanie Pythona 3...${NC}"
         apt update > /dev/null 2>&1
-        apt install -y python3 > /dev/null 2>&1
+        apt install -y python3 python3-pip > /dev/null 2>&1
     fi
     
     echo -e "${GREEN}✅ Wszystkie zależności są dostępne${NC}"
@@ -1031,7 +1036,7 @@ HTML
 
         .header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 2rem;
         }
@@ -1085,7 +1090,7 @@ HTML
 
         .stat-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 1rem;
         }
@@ -1159,7 +1164,7 @@ HTML
 
         .section-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: center;
             margin-bottom: 1.5rem;
         }
@@ -1228,7 +1233,7 @@ HTML
 
         .server-header {
             display: flex;
-            justify-content: between;
+            justify-content: space-between;
             align-items: start;
             margin-bottom: 1rem;
         }
@@ -1629,12 +1634,13 @@ HTML
 </html>
 HTML
 
-    # Prosty serwer
+    # Prosty serwer Python
     cat > "$WEB_DIR/start_server.py" << 'PYTHON'
 #!/usr/bin/env python3
 import http.server
 import socketserver
 import os
+import sys
 
 PORT = 8080
 WEB_DIR = "/home/purplehost/web"
@@ -1649,12 +1655,27 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif self.path == '/client':
             self.path = '/client/index.html'
         return super().do_GET()
+    
+    def log_message(self, format, *args):
+        print(f"🌐 {self.address_string()} - {format % args}")
 
 def start_server():
     os.chdir(WEB_DIR)
-    with socketserver.TCPServer(("", PORT), Handler) as httpd:
-        print(f"🚀 PurpleHost nowoczesny panel działa na http://localhost:{PORT}")
-        httpd.serve_forever()
+    
+    try:
+        with socketserver.TCPServer(("", PORT), Handler) as httpd:
+            print(f"🚀 PurpleHost nowoczesny panel działa na http://0.0.0.0:{PORT}")
+            print(f"📱 Strona główna: http://localhost:{PORT}")
+            print(f"🎮 Panel klienta: http://localhost:{PORT}/client")
+            print("⏹️  Aby zatrzymać, naciśnij Ctrl+C")
+            httpd.serve_forever()
+    except OSError as e:
+        if "Address already in use" in str(e):
+            print(f"❌ Port {PORT} jest już zajęty!")
+            print("💡 Spróbuj uruchomić z innym portem lub zatrzymać istniejący proces")
+            sys.exit(1)
+        else:
+            raise
 
 if __name__ == "__main__":
     start_server()
@@ -1670,6 +1691,7 @@ PYTHON
 start_web_server() {
     echo -e "${PURPLE}🌐 Uruchamianie nowoczesnego panelu...${NC}"
     
+    # Sprawdź czy port jest zajęty
     if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null ; then
         echo -e "${YELLOW}🔄 Port $PORT jest zajęty, zatrzymywanie...${NC}"
         pkill -f "start_server.py"
@@ -1677,10 +1699,10 @@ start_web_server() {
     fi
     
     cd "$WEB_DIR"
-    python3 start_server.py &
+    nohup python3 start_server.py > "$LOG_DIR/web_server.log" 2>&1 &
     local server_pid=$!
     
-    sleep 2
+    sleep 3
     
     if ps -p $server_pid > /dev/null 2>&1; then
         local ip=$(hostname -I | awk '{print $1}')
@@ -1711,12 +1733,27 @@ start_web_server() {
         fi
         
         echo $server_pid > "$PANEL_DIR/web_server.pid"
+        log "Panel web uruchomiony na porcie $PORT"
         
     else
         error "❌ Nie udało się uruchomić serwera!"
+        echo -e "${YELLOW}🔄 Próba uruchomienia prostym serwerem HTTP...${NC}"
         cd "$WEB_DIR"
-        python3 -m http.server $PORT &
+        nohup python3 -m http.server $PORT > "$LOG_DIR/web_server.log" 2>&1 &
+        echo $! > "$PANEL_DIR/web_server.pid"
     fi
+}
+
+stop_web_server() {
+    echo -e "${PURPLE}🛑 Zatrzymywanie serwera web...${NC}"
+    if [ -f "$PANEL_DIR/web_server.pid" ]; then
+        local pid=$(cat "$PANEL_DIR/web_server.pid")
+        kill $pid 2>/dev/null
+        rm -f "$PANEL_DIR/web_server.pid"
+    fi
+    pkill -f "start_server.py"
+    pkill -f "http.server"
+    echo -e "${GREEN}✅ Serwer web zatrzymany${NC}"
 }
 
 # =============================================
@@ -1733,6 +1770,11 @@ echo -e "╚══════════════════════�
 echo -e "${NC}"
 echo -e "${CYAN}Tworzenie nowoczesnego panelu hostingowego...${NC}"
 echo ""
+
+# Sprawdź uprawnienia
+if [ "$EUID" -ne 0 ]; then
+    echo -e "${YELLOW}⚠️  Uwaga: Uruchom jako root dla pełnej funkcjonalności${NC}"
+fi
 
 setup_directories
 check_dependencies
@@ -1753,15 +1795,18 @@ echo -e "║     • 📱 Fully responsive                                 ║"
 echo -e "║     • 🎯 Dark theme modern UI                             ║"
 echo -e "║     • 🔮 Micro-interactions                               ║"
 echo -e "║                                                            ║"
-echo -e "║  Wejdź na http://localhost:8080                           ║"
+echo -e "║  🌐 Wejdź na: http://localhost:8080                       ║"
+echo -e "║  🎮 Panel klienta: http://localhost:8080/client           ║"
 echo -e "║                                                            ║"
 echo -e "╚════════════════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
 echo -e "${YELLOW}📝 Aby zatrzymać panel, naciśnij Ctrl+C${NC}"
 
-trap 'echo -e "\n${GREEN}👋 Zamykanie PurpleHost...${NC}"; pkill -f "start_server.py"; exit 0' INT TERM
+# Obsługa sygnału zakończenia
+trap 'echo -e "\n${GREEN}👋 Zamykanie PurpleHost...${NC}"; stop_web_server; exit 0' INT TERM
 
+# Pętla główna
 while true; do
     sleep 60
 done
