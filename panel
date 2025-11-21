@@ -7,14 +7,19 @@ HOST="airlink-menu.jishnumondal32.workers.dev"
 NETRC="${HOME}/.netrc"
 
 # --- helpers ---
-b64d() { printf '%s' "$1" | base64 -d; }
+b64d() { 
+    printf '%s' "$1" | base64 -d 2>/dev/null || {
+        echo "Base64 decode failed for: $1" >&2
+        return 1
+    }
+}
 
 # verify by jishnu
 USER_B64="amlzaG51"
 PASS_B64="amlzaG51aEBja2VyMTIz"
 
-USER_RAW="$(b64d "$USER_B64")"
-PASS_RAW="$(b64d "$PASS_B64")"
+USER_RAW="$(b64d "$USER_B64")" || exit 1
+PASS_RAW="$(b64d "$PASS_B64")" || exit 1
 
 if [ -z "$USER_RAW" ] || [ -z "$PASS_RAW" ]; then
   echo "Credential decode failed." >&2
@@ -27,14 +32,24 @@ if ! command -v curl >/dev/null 2>&1; then
   exit 1
 fi
 
+# Create .netrc directory if it doesn't exist
+NETRC_DIR=$(dirname "$NETRC")
+mkdir -p "$NETRC_DIR"
+
 # Prepare ~/.netrc with strict perms
 touch "$NETRC"
 chmod 600 "$NETRC"
 
+# Safely remove existing entry for this host
 tmpfile="$(mktemp)"
-grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmpfile" || true
-mv "$tmpfile" "$NETRC"
+if [ -f "$NETRC" ] && [ -s "$NETRC" ]; then
+    grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmpfile" 2>/dev/null || true
+    mv "$tmpfile" "$NETRC"
+else
+    rm -f "$tmpfile"
+fi
 
+# Add credentials to netrc
 {
   printf 'machine %s ' "$HOST"
   printf 'login %s ' "$USER_RAW"
@@ -43,12 +58,39 @@ mv "$tmpfile" "$NETRC"
 
 # Fetch and execute safely
 script_file="$(mktemp)"
-cleanup() { rm -f "$script_file"; }
+cleanup() { 
+    rm -f "$script_file"
+    # Optional: Remove the added netrc entry
+    if [ -f "$NETRC" ]; then
+        tmp_cleanup="$(mktemp)"
+        grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmp_cleanup" 2>/dev/null || true
+        mv "$tmp_cleanup" "$NETRC"
+    fi
+}
 trap cleanup EXIT
 
-if curl -fsS --netrc -o "$script_file" "$URL"; then
-  bash "$script_file"
+echo "Downloading script from $URL..."
+
+if curl -fsS --netrc --max-time 30 -o "$script_file" "$URL"; then
+    # Validate the downloaded script is not empty and is safe to run
+    if [ ! -s "$script_file" ]; then
+        echo "Error: Downloaded script is empty" >&2
+        exit 1
+    fi
+    
+    echo "Script downloaded successfully, executing..."
+    head -n 5 "$script_file" 2>/dev/null | grep -q "^#!/" || {
+        echo "Warning: Script doesn't appear to have a shebang line"
+    }
+    
+    # Make script executable and run
+    chmod +x "$script_file"
+    bash "$script_file" "$@"
 else
-  echo "Authentication or download failed." >&2
-  exit 1
+    echo "Authentication or download failed." >&2
+    echo "Please check:"
+    echo "1. Your internet connection"
+    echo "2. The URL is accessible: $URL"
+    echo "3. Credentials are correct"
+    exit 1
 fi
