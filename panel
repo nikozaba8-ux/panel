@@ -5,11 +5,23 @@ set -euo pipefail
 URL="https://airlink-menu.jishnumondal32.workers.dev"
 HOST="airlink-menu.jishnumondal32.workers.dev"
 NETRC="${HOME}/.netrc"
+LOG_FILE="/home/codespace/airlink_setup.log"
+
+# Funkcja logowania
+log() {
+    echo "$(date): $*" >> "$LOG_FILE"
+    echo "$*" >&2
+}
+
+# Czyszczenie logu
+> "$LOG_FILE"
+
+log "Starting Airlink setup script..."
 
 # --- helpers ---
 b64d() { 
     printf '%s' "$1" | base64 -d 2>/dev/null || {
-        echo "Base64 decode failed for: $1" >&2
+        log "Base64 decode failed for: $1"
         return 1
     }
 }
@@ -18,19 +30,24 @@ b64d() {
 USER_B64="amlzaG51"
 PASS_B64="amlzaG51aEBja2VyMTIz"
 
+log "Decoding credentials..."
 USER_RAW="$(b64d "$USER_B64")" || exit 1
 PASS_RAW="$(b64d "$PASS_B64")" || exit 1
 
 if [ -z "$USER_RAW" ] || [ -z "$PASS_RAW" ]; then
-  echo "Credential decode failed." >&2
+  log "Credential decode failed."
   exit 1
 fi
 
+log "Credentials decoded successfully"
+
 # Ensure curl exists
 if ! command -v curl >/dev/null 2>&1; then
-  echo "Error: curl is required but not installed." >&2
+  log "Error: curl is required but not installed."
   exit 1
 fi
+
+log "Curl is available"
 
 # Create .netrc directory if it doesn't exist
 NETRC_DIR=$(dirname "$NETRC")
@@ -40,57 +57,101 @@ mkdir -p "$NETRC_DIR"
 touch "$NETRC"
 chmod 600 "$NETRC"
 
+log "NETRC file prepared: $NETRC"
+
 # Safely remove existing entry for this host
 tmpfile="$(mktemp)"
+log "Creating temporary file: $tmpfile"
+
 if [ -f "$NETRC" ] && [ -s "$NETRC" ]; then
-    grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmpfile" 2>/dev/null || true
+    log "Removing existing entry for $HOST from netrc"
+    grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmpfile" 2>/dev/null || {
+        log "No existing entry found or grep failed, using empty file"
+        > "$tmpfile"
+    }
     mv "$tmpfile" "$NETRC"
 else
+    log "NETRC file was empty or doesn't exist"
     rm -f "$tmpfile"
 fi
 
 # Add credentials to netrc
+log "Adding credentials to netrc for $HOST"
 {
   printf 'machine %s ' "$HOST"
   printf 'login %s ' "$USER_RAW"
   printf 'password %s\n' "$PASS_RAW"
 } >> "$NETRC"
 
+log "Credentials added to netrc"
+
 # Fetch and execute safely
 script_file="$(mktemp)"
+log "Created temporary script file: $script_file"
+
 cleanup() { 
+    log "Cleaning up temporary files..."
     rm -f "$script_file"
     # Optional: Remove the added netrc entry
     if [ -f "$NETRC" ]; then
         tmp_cleanup="$(mktemp)"
         grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmp_cleanup" 2>/dev/null || true
         mv "$tmp_cleanup" "$NETRC"
+        log "Cleaned netrc entries"
     fi
 }
 trap cleanup EXIT
 
-echo "Downloading script from $URL..."
+log "Downloading script from $URL..."
 
-if curl -fsS --netrc --max-time 30 -o "$script_file" "$URL"; then
-    # Validate the downloaded script is not empty and is safe to run
+# Test connection first
+if ! curl -fsS --netrc --max-time 30 -I "$URL" >/dev/null 2>&1; then
+    log "ERROR: Cannot connect to $URL - server may be down or credentials invalid"
+    exit 1
+fi
+
+if curl -v --netrc --max-time 30 -o "$script_file" "$URL" 2>> "$LOG_FILE"; then
+    log "Script downloaded successfully to $script_file"
+    
+    # Validate the downloaded script
     if [ ! -s "$script_file" ]; then
-        echo "Error: Downloaded script is empty" >&2
+        log "ERROR: Downloaded script is empty"
         exit 1
     fi
     
-    echo "Script downloaded successfully, executing..."
-    head -n 5 "$script_file" 2>/dev/null | grep -q "^#!/" || {
-        echo "Warning: Script doesn't appear to have a shebang line"
-    }
+    file_size=$(stat -c%s "$script_file" 2>/dev/null || stat -f%z "$script_file" 2>/dev/null || echo "unknown")
+    log "Downloaded file size: $file_size bytes"
+    
+    # Check file content
+    log "First 100 characters of downloaded script:"
+    head -c 100 "$script_file" >> "$LOG_FILE"
+    echo "" >> "$LOG_FILE"
+    
+    # Check if it's a bash script
+    if head -n 1 "$script_file" | grep -q "^#!/bin/bash"; then
+        log "Script has bash shebang"
+    elif head -n 1 "$script_file" | grep -q "^#!/"; then
+        shebang=$(head -n 1 "$script_file")
+        log "Script has shebang: $shebang"
+    else
+        log "WARNING: Script doesn't have a shebang line"
+    fi
     
     # Make script executable and run
     chmod +x "$script_file"
-    bash "$script_file" "$@"
+    log "Executing script..."
+    
+    # Execute with full logging
+    if bash -x "$script_file" 2>> "$LOG_FILE"; then
+        log "Script executed successfully"
+        exit 0
+    else
+        script_exit_code=$?
+        log "ERROR: Script execution failed with exit code: $script_exit_code"
+        exit $script_exit_code
+    fi
 else
-    echo "Authentication or download failed." >&2
-    echo "Please check:"
-    echo "1. Your internet connection"
-    echo "2. The URL is accessible: $URL"
-    echo "3. Credentials are correct"
+    curl_exit_code=$?
+    log "ERROR: Download failed with curl exit code: $curl_exit_code"
     exit 1
 fi
