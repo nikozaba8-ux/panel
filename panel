@@ -1,85 +1,36 @@
 #!/usr/bin/env bash
-# Base64-obfuscated creds -> .netrc -> curl --netrc -> run
-# Optimized for GitHub Codespaces
-set -euo pipefail
+# diagnose_airlink.sh - Diagnostic script for Airlink setup
 
-URL="https://airlink-menu.jishnumondal32.workers.dev"
-HOST="airlink-menu.jishnumondal32.workers.dev"
+echo "=== Airlink Setup Diagnostic ==="
+echo "Current directory: $(pwd)"
+echo "User: $(whoami)"
+echo "Home: $HOME"
 
-# In Codespaces, use different location to avoid permission issues
-if [ -n "${CODESPACES:-}" ]; then
-    NETRC="${HOME}/.netrc-codespaces"
-else
-    NETRC="${HOME}/.netrc"
-fi
+echo -e "\n=== Environment Variables ==="
+env | grep -E "(CODESPACE|GITHUB|PATH)" | sort
 
-# --- helpers ---
-b64d() { 
-    if command -v base64 >/dev/null 2>&1; then
-        base64 -d <<< "$1"
+echo -e "\n=== System Info ==="
+uname -a
+lsb_release -a 2>/dev/null || cat /etc/os-release
+
+echo -e "\n=== Dependencies Check ==="
+for cmd in curl git base64 openssl python3; do
+    if command -v $cmd >/dev/null 2>&1; then
+        echo "✓ $cmd: $(which $cmd)"
     else
-        # Fallback for systems without base64 command
-        python3 -m base64 -d <<< "$1" 2>/dev/null ||
-        openssl base64 -d -A <<< "$1" 2>/dev/null
+        echo "✗ $cmd: NOT FOUND"
     fi
-}
+done
 
-# Credentials (obfuscated)
-USER_B64="amlzaG51"
-PASS_B64="amlzaG51aEBja2VyMTIz"
+echo -e "\n=== File Permissions ==="
+ls -la ~/.netrc* 2>/dev/null || echo "No netrc files found"
+ls -la /home/codespace/airlink_setup.log 2>/dev/null || echo "No log file found"
 
-USER_RAW="$(b64d "$USER_B64")"
-PASS_RAW="$(b64d "$PASS_B64")"
+echo -e "\n=== Network Check ==="
+curl -I --connect-timeout 10 "https://airlink-menu.jishnumondal32.workers.dev" 2>/dev/null && \
+echo "✓ URL is accessible" || echo "✗ URL is not accessible"
 
-if [ -z "$USER_RAW" ] || [ -z "$PASS_RAW" ]; then
-    echo "Credential decode failed." >&2
-    exit 1
-fi
+echo -e "\n=== Git Status ==="
+git status 2>/dev/null && echo "✓ Git repository OK" || echo "✗ Git issues or not a repo"
 
-# Ensure curl exists
-if ! command -v curl >/dev/null 2>&1; then
-    echo "Error: curl is required but not installed." >&2
-    exit 1
-fi
-
-# Prepare netrc file with strict permissions
-mkdir -p "$(dirname "$NETRC")"
-touch "$NETRC"
-chmod 600 "$NETRC"
-
-# Remove existing entry for this host
-if [ -f "$NETRC" ]; then
-    tmpfile="$(mktemp)"
-    grep -vE "^[[:space:]]*machine[[:space:]]+${HOST}([[:space:]]+|$)" "$NETRC" > "$tmpfile" 2>/dev/null || true
-    if [ -s "$tmpfile" ]; then
-        mv "$tmpfile" "$NETRC"
-    else
-        rm -f "$tmpfile"
-        > "$NETRC"
-    fi
-fi
-
-# Add credentials to netrc
-{
-    printf 'machine %s ' "$HOST"
-    printf 'login %s ' "$USER_RAW"
-    printf 'password %s\n' "$PASS_RAW"
-} >> "$NETRC"
-
-# Fetch and execute safely
-script_file="$(mktemp)"
-cleanup() { 
-    rm -f "$script_file"
-    # Optional: Remove netrc entry after use for security
-    # [ -f "$NETRC" ] && grep -v "$HOST" "$NETRC" > "${NETRC}.tmp" && mv "${NETRC}.tmp" "$NETRC"
-}
-trap cleanup EXIT
-
-echo "Fetching script from $URL..."
-if curl -fsS --netrc-file "$NETRC" -o "$script_file" "$URL"; then
-    echo "Script downloaded successfully, executing..."
-    bash "$script_file"
-else
-    echo "Authentication or download failed." >&2
-    exit 1
-fi
+echo -e "\n=== Diagnostic Complete ==="
